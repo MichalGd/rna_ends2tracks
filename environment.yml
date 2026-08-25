@@ -24,5 +24,3 @@ dependencies:
   - rseqc=5.0
   - bedtools=2.31
   - ucsc-bedgraphtobigwig
-  - pip:
-      - "-e ."

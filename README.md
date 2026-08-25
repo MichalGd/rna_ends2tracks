@@ -25,6 +25,8 @@ python -m pip install --no-deps .
 rna-ends2tracks --version
 ```
 
+The source installation above is appropriate for development or an alpha canary. A shared release should install the tagged wheel with `python -m pip install --no-deps <wheel>`; do not use `pip install -e` in a shared production environment.
+
 See [shared-server installation](docs/SHARED_SERVER_INSTALL.md) for a read-only installation usable by every server user. PolyAseqTrap is isolated behind the [APA-B adapter contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md) because its REV behavior and DeepIP assets must pass a local pilot before use.
 
 Current verification and production-gate details are recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md).

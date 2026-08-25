@@ -5,8 +5,8 @@ The workflow contains no usernames, home-directory assumptions or fixed project 
 ## Recommended administrator procedure
 
 1. Clone or copy a tagged workflow release under a versioned, read-only path such as `/opt/rna_ends2tracks/0.1.0`.
-2. Create the Conda environment from `environment.yml` with Mamba/Conda. Generate a platform-specific `conda-lock` file before production release and retain it with the installation.
-3. Install the package in that environment with `python -m pip install --no-deps .`.
+2. Create the Conda environment from `environment.yml` with Mamba/Conda. The environment file deliberately does not install the workflow source. Generate a platform-specific `conda-lock` file before production release and retain it with the installation.
+3. Install a tagged wheel in that environment with `python -m pip install --no-deps rna_ends2tracks-<version>-py3-none-any.whl`. For an alpha source canary only, `python -m pip install --no-deps .` is acceptable from an immutable tagged checkout; never use editable mode for the shared installation.
 4. Build separate shared references for human GRCh38 and mouse GRCm39. Never mix FASTA, GTF, STAR index, chromosome sizes or PAS atlas releases.
 5. Give the server user group read/execute access to software and references. Users need write access only to their own output and scheduler-log directories.
 6. Expose the environment with the site module system or a small launcher. Do not modify users' shell startup files.
