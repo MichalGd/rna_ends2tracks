@@ -6,11 +6,11 @@
 
 ## Direct answer
 
-The isolated alpha.3 environment is ready for a versioned **server canary installation**, but the workflow is not yet ready to be described as production validated. The package specification solved on `biolserv` with Mamba 2.8.0 (386 packages; approximately 450 MB), and the pushed environment commit passed both [CI](https://github.com/MichalGd/rna_ends2tracks/actions/runs/32837345097) and [Complete environment](https://github.com/MichalGd/rna_ends2tracks/actions/runs/32837345018).
+The isolated alpha.3 environment is ready for a versioned **server canary installation**, but the workflow is not yet ready to be described as production validated. The package specification solved on `biolserv` with Mamba 2.8.0 (386 packages; approximately 450 MB). Final pre-tag commit `b1133268ea852d528e25b9910f3f80d708743154` passed both [CI](https://github.com/MichalGd/rna_ends2tracks/actions/runs/32838086483) and [Complete environment](https://github.com/MichalGd/rna_ends2tracks/actions/runs/32838086350).
 
 The research review found and corrected one pre-tag issue: BBDuk was invoked with `qtrim=t`, which BBTools interprets as trimming both ends. Because the APA-defining QuantSeq REV coordinate is the 5-prime end of Read 1, alpha.3 now uses `qtrim=r`, preserving that coordinate. A unit assertion and a real BBDuk CI smoke test protect this command.
 
-Proceed in this order: obtain green CI for the trimming correction, tag alpha.3, create a new environment prefix, install the tagged wheel or immutable tagged source, validate the two reference manifests, and run synthetic/small real-data canaries. Do not enable APA-B or call the deployment production-ready yet.
+Proceed in this order: tag alpha.3, create a new environment prefix, install the tagged wheel or immutable tagged source, validate the two reference manifests, and run synthetic/small real-data canaries. Do not enable APA-B or call the deployment production-ready yet.
 
 ## Evidence and decisions
 
@@ -40,8 +40,8 @@ Proceed in this order: obtain green CI for the trimming correction, tag alpha.3,
 | Gate | Status | Required action |
 |---|---|---|
 | Alpha.3 environment solve | Passed | Preserve the solved specification and create only a new prefix. |
-| Full Linux package integration | Passed for environment commit | Re-run after the trimming/CI-smoke correction and require green status. |
-| REV coordinate-preserving trimming | Corrected, awaiting CI | Require unit and real BBDuk smoke tests to pass before tagging. |
+| Full Linux package integration | Passed on final pre-tag commit | Preserve the successful Actions run with the release record. |
+| REV coordinate-preserving trimming | Passed | Unit tests and the real BBDuk environment smoke test passed on `b1133268`. |
 | Human and mouse reference manifests | Audited assets available | Create release manifests with exact absolute paths and SHA-256 provenance. |
 | Chromosome sizes | Full files generated in audit area | Publish immutable copies alongside each release manifest; do not use the subset-like legacy files. |
 | PAS atlas | Missing | APA-A can run without known-PAS annotation, but interpretation is reduced; obtain assembly-matched resources when feasible. |
@@ -58,4 +58,3 @@ The first installation should expose DGE and APA-A for validation while leaving 
 ## Material limitations
 
 Lexogen's current guidance describes general preprocessing and exact REV end behavior but does not validate this repository's complete APA statistics. The existing STAR indexes have been structurally audited but are still owner-writable and have not yet been loaded by the new runtime. PolyAseqTrap/DeepIP and an assembly-matched PAS atlas are not installed. Candidate intragenic cleavage sites can be described as candidate PCPA events consistent with premature termination, but QuantSeq alone cannot prove downstream RNA-polymerase termination.
-
