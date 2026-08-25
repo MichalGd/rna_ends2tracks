@@ -1,0 +1,45 @@
+project_id: quantseq_rev_example
+output_dir: ../results/example
+condition_order: [control, treatment]
+design: "~ batch + condition"
+
+reference:
+  # Select exactly one matching manifest. Both species use the same workflow code.
+  manifest: ../references/human_GRCh38.example.yaml
+
+protocol:
+  profile: quantseq_rev_v2_se
+  has_umi: false
+  retain_duplicate_flagged_reads: true
+  orientation_min_fraction: 0.75
+
+preprocessing:
+  trim_quality: 10
+  minimum_length: 20
+  # Default packaged FASTA contains TruSeq adapters plus poly(A)18/poly(T)18.
+  bbduk_reference: adapters,polyA_T
+
+resources:
+  threads: 8
+  memory_gb: 32
+
+apa_a:
+  min_reads: 5
+  min_samples: 2
+  cluster_gap_nt: 24
+  max_known_pas_distance_nt: 24
+  internal_priming_a_fraction: 0.70
+  internal_priming_a_run: 6
+
+apa_b:
+  enabled: false
+  # Change only after the documented REV pilot passes.
+  pilot_accepted: false
+  engine: polyaseqtrap
+  statistics: drimseq_stager
+  # Adapter must independently produce pas_catalog.tsv, pas_counts.tsv, deepip_audit.tsv.
+  command_template: "polyaseqtrap_quantseq_rev --bam-manifest {bam_manifest} --fasta {fasta} --gtf {gtf} --species {species} --output {outdir} --no-umi --retain-coordinate-duplicates"
+
+reporting:
+  fdr: 0.05
+  min_abs_delta_pau: 0.10

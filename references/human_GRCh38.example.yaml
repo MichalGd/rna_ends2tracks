@@ -1,0 +1,10 @@
+species: human
+assembly: GRCh38
+provider: GENCODE
+release: "set-explicit-release"
+fasta: /shared/references/human/GRCh38/genome.fa
+gtf: /shared/references/human/GRCh38/annotation.gtf
+star_index: /shared/references/human/GRCh38/STAR_index
+chrom_sizes: /shared/references/human/GRCh38/GRCh38.chrom.sizes
+pas_atlas: /shared/references/human/GRCh38/polyasite.bed.gz
+coordinate_convention: "FASTA/GTF genomic; BED outputs zero-based half-open"

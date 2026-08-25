@@ -1,0 +1,10 @@
+*.py[cod]
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.RData
+*.Rhistory
+results/
+dist/
+build/
+*.egg-info/

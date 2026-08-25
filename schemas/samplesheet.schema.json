@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/rna_ends2tracks/samplesheet.schema.json",
+  "title": "Logical schema for one lane-level samplesheet row",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "sample_id", "biological_replicate_id", "lane_id", "fastq_r1", "fastq_r2", "condition",
+    "batch", "subject", "library_protocol", "library_layout", "read_length", "kit_catalog", "umi_present"
+  ],
+  "properties": {
+    "sample_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+    "biological_replicate_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+    "lane_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+    "fastq_r1": {"type": "string", "pattern": "\\.(fastq|fq)\\.gz$"},
+    "fastq_r2": {"const": ""},
+    "condition": {"type": "string", "minLength": 1},
+    "library_protocol": {"enum": ["quantseq_rev_v2_se", "quantseq_rev_v1_se"]},
+    "library_layout": {"const": "SE"},
+    "read_length": {"type": ["integer", "string"]},
+    "umi_present": {"enum": [false, "false", "no", "0", 0]}
+  }
+}

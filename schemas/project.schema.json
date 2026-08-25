@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/rna_ends2tracks/project.schema.json",
+  "title": "rna_ends2tracks project configuration",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["project_id", "condition_order", "design", "reference", "protocol"],
+  "properties": {
+    "project_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+    "output_dir": {"type": "string"},
+    "condition_order": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string"}},
+    "design": {"type": "string", "pattern": "condition"},
+    "reference": {
+      "type": "object",
+      "oneOf": [
+        {"required": ["manifest"]},
+        {"required": ["species", "assembly", "fasta", "gtf", "star_index", "chrom_sizes"]}
+      ]
+    },
+    "protocol": {
+      "type": "object",
+      "required": ["profile", "has_umi", "retain_duplicate_flagged_reads"],
+      "properties": {
+        "profile": {"enum": ["quantseq_rev_v2_se", "quantseq_rev_v1_se"]},
+        "has_umi": {"const": false},
+        "retain_duplicate_flagged_reads": {"const": true}
+      }
+    },
+    "apa_b": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "pilot_accepted": {"type": "boolean"},
+        "command_template": {"type": "string"}
+      }
+    }
+  }
+}

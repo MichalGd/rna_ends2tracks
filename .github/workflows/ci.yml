@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip build
+      - run: python -m pip install -e .
+      - run: python -m compileall -q src tests
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - run: python -m build
+      - name: Installed-package asset smoke test
+        run: |
+          python -m pip install --force-reinstall --no-deps dist/*.whl
+          cd /tmp
+          python -c 'from rnaends2tracks.paths import workflow_asset; assert workflow_asset("scripts/R/deseq2_all_pairs.R").is_file(); assert workflow_asset("resources/quantseq_rev_adapters.fa").is_file()'
+
+  shell-and-r-parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax and ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          find bin scripts/bash tests -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          find bin scripts/bash tests -type f -name '*.sh' -print0 | xargs -0 shellcheck
+      - uses: r-lib/actions/setup-r@v2
+      - name: Parse R modules
+        shell: Rscript {0}
+        run: |
+          files <- list.files("scripts/R", pattern="[.]R$", full.names=TRUE)
+          stopifnot(length(files) == 3L)
+          invisible(lapply(files, parse))
+
+  repository-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install check-jsonschema PyYAML
+      - run: check-jsonschema schemas/project.schema.json
+      - run: check-jsonschema schemas/samplesheet.schema.json
+      - name: Reject generated or sensitive paths
+        run: |
+          ! git ls-files | grep -E '(^|/)(results|__pycache__|\.conda|envs?)/|[.](fastq|fq)[.]gz$|[.]bam$|[.]bai$|[.]bw$'
+          ! grep -RInE 'C:\\Users\\|/home/[^ /]+|D:\\bioinformatics' --exclude=ci.yml --exclude-dir=.git .
