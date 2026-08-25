@@ -13,7 +13,8 @@ statistics:
     incomplete_pair_action: error
 
 reference:
-  # Select exactly one matching manifest. Both species use the same workflow code.
+  # Select exactly one manifest. Every samplesheet genome value must resolve to
+  # the same assembly declared by this manifest.
   manifest: ../references/human_GRCh38.example.yaml
 
 protocol:

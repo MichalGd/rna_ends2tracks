@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.5 - 2026-08-25
+
+- **Breaking samplesheet contract:** existing sheets must add `description`, `genome`, and `technical_replicate_id`; active alpha.4 projects must finish with their versioned alpha.4 launcher.
+- Added explicit `genome`, `technical_replicate_id`, and free-text `description` samplesheet columns.
+- Normalize `hg38`/`GRCh38` and `mm39`/`GRCm39` aliases, require one genome per project, and reject a samplesheet/reference-manifest assembly mismatch before compute.
+- Model biological samples, technical library preparations, and sequencing lanes separately. Multiple technical preparations and lanes sharing one `sample_id` are aligned independently and merged before DGE or APA statistics.
+- Record technical-replicate and lane counts in validated biological-sample metadata and preserve technical-library identity in BAM read groups, filenames, logs, and orientation QC.
+- Document the distinction between a biological replicate, technical replicate, sequencing lane, and matched-pair `subject`.
+
 ## 0.1.0-alpha.4 - 2026-08-25
 
 - Added configurable contrast-specific pairing with `none`, `auto`, and `required` modes.

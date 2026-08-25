@@ -11,6 +11,12 @@ cross-target comparisons.
 - The samples are confirmed as mouse mESC data; the GRCm39/gencode vM31 shared
   reference manifest is selected.
 - Libraries are confirmed no-UMI Lexogen QuantSeq REV V2 single-end.
+- Every row declares `GRCm39`, matching the selected reference manifest. Each
+  biological sample has one library preparation (`technical_replicate_id: T01`)
+  and one sequencing lane (`L002`); additional technical preparations or lanes
+  would repeat the same `sample_id` in additional rows.
+- `description` provides a human-readable label, while filesystem-safe IDs remain
+  stable machine identifiers.
 - The model is `~ condition`. All samples are from `run8`, so a one-level batch
   term is retained only as metadata and excluded from the statistical design.
 - Control and IAA samples are paired biological units within each target. Matching
@@ -36,7 +42,7 @@ rna-ends2tracks \
 Validation should report 18 samples, 18 lanes and 15 contrasts. It should mark the
 three within-target contrasts as paired and cross-target contrasts as unpaired.
 
-The alpha.4 configuration uses contrast-specific pairing. The three complete
+The alpha.5 configuration uses contrast-specific pairing. The three complete
 within-target pairs resolve to `~ subject + condition`; the twelve cross-target
 contrasts have disjoint subject sets and resolve to `~ condition`. A single global
 `~ subject + condition` formula must not be substituted because subjects are nested

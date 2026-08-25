@@ -8,8 +8,11 @@ import yaml
 
 from rnaends2tracks.config import (
     ConfigError,
+    REQUIRED_COLUMNS,
     build_plan,
+    collapse_samples,
     generate_contrasts,
+    load_samplesheet,
     resolve_contrast_designs,
     validate_design,
 )
@@ -17,7 +20,8 @@ from rnaends2tracks.config import (
 
 def sample(sample_id, condition, batch, subject=""):
     return {
-        "sample_id": sample_id, "biological_replicate_id": sample_id, "condition": condition,
+        "sample_id": sample_id, "description": f"Description for {sample_id}", "genome": "GRCh38",
+        "biological_replicate_id": sample_id, "technical_replicate_id": "T01", "condition": condition,
         "batch": batch, "subject": subject, "library_protocol": "quantseq_rev_v2_se",
         "library_layout": "SE", "read_length": "100", "kit_catalog": "REV_V2", "umi_present": "false",
     }
@@ -120,6 +124,26 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "safe column name"):
             resolve_contrast_designs(samples, generate_contrasts(samples, ["A", "B"]), project)
 
+    def test_technical_replicates_and_lanes_collapse_to_one_biological_sample(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with (root / "samples.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(REQUIRED_COLUMNS)); writer.writeheader()
+                for technical, lane in (("T01", "L001"), ("T01", "L002"), ("T02", "L001")):
+                    row = sample("S1", "A", "B1")
+                    row.update({
+                        "technical_replicate_id": technical, "lane_id": lane,
+                        "fastq_r1": f"S1_{technical}_{lane}.fastq.gz", "fastq_r2": "",
+                    })
+                    writer.writerow(row)
+            rows = load_samplesheet(root / "samples.csv", check_fastqs=False)
+            collapsed = collapse_samples(rows)
+            self.assertEqual(len(collapsed), 1)
+            self.assertEqual(collapsed[0]["technical_replicate_count"], "2")
+            self.assertEqual(collapsed[0]["sequencing_lane_count"], "3")
+            self.assertEqual(collapsed[0]["description"], "Description for S1")
+            self.assertNotIn("technical_replicate_id", collapsed[0])
+
     def test_mouse_project_and_no_umi_contract(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); (root / "star").mkdir()
@@ -132,18 +156,29 @@ class ContractTests(unittest.TestCase):
                        "reference": {"manifest": "reference.yaml"},
                        "protocol": {"profile": "quantseq_rev_v2_se", "has_umi": False, "retain_duplicate_flagged_reads": True}}
             (root / "project.yaml").write_text(yaml.safe_dump(project), encoding="utf-8")
-            fields = ["sample_id", "biological_replicate_id", "lane_id", "fastq_r1", "fastq_r2", "condition", "batch",
-                      "subject", "library_protocol", "library_layout", "read_length", "kit_catalog", "umi_present"]
+            fields = list(REQUIRED_COLUMNS)
             with (root / "samples.csv").open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
                 for condition in ("A", "B"):
                     for index in (1, 2):
                         row = sample(f"{condition}{index}", condition, "B1")
-                        row.update({"lane_id": "L001", "fastq_r1": f"{condition}{index}.fastq.gz", "fastq_r2": ""})
+                        row.update({
+                            "genome": "mm39", "lane_id": "L001",
+                            "fastq_r1": f"{condition}{index}.fastq.gz", "fastq_r2": "",
+                        })
                         writer.writerow(row)
             plan = build_plan(root / "project.yaml", root / "samples.csv", check_inputs=False)
             self.assertEqual(plan.reference["species"], "mouse")
+            self.assertEqual({item["genome"] for item in plan.samples}, {"GRCm39"})
             self.assertEqual(len(plan.contrasts), 1)
+            original = (root / "samples.csv").read_text(encoding="utf-8")
+            mixed = original.replace("mm39", "GRCh38", 1)
+            (root / "samples.csv").write_text(mixed, encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "exactly one genome"):
+                build_plan(root / "project.yaml", root / "samples.csv", check_inputs=False)
+            (root / "samples.csv").write_text(original.replace("mm39", "GRCh38"), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "does not match reference-manifest assembly"):
+                build_plan(root / "project.yaml", root / "samples.csv", check_inputs=False)
 
     def test_existing_star_index_is_reused_only_when_contigs_and_lengths_match(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -164,8 +199,7 @@ class ContractTests(unittest.TestCase):
                        "reference": {"manifest": "reference.yaml"},
                        "protocol": {"profile": "quantseq_rev_v2_se", "has_umi": False, "retain_duplicate_flagged_reads": True}}
             (root / "project.yaml").write_text(yaml.safe_dump(project), encoding="utf-8")
-            fields = ["sample_id", "biological_replicate_id", "lane_id", "fastq_r1", "fastq_r2", "condition", "batch",
-                      "subject", "library_protocol", "library_layout", "read_length", "kit_catalog", "umi_present"]
+            fields = list(REQUIRED_COLUMNS)
             with (root / "samples.csv").open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
                 for condition in ("A", "B"):

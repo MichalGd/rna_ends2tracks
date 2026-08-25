@@ -3,11 +3,11 @@
 ## Implemented
 
 - Portable `rna-ends2tracks` CLI with independently callable modules and an `all` sequence.
-- Strict lane-level samplesheet, no-UMI protocol, additive-design and reference validation.
+- Strict lane-level samplesheet with explicit assembly, biological replicate, technical library, sequencing lane, description, no-UMI protocol, additive-design and reference validation.
 - Deterministic all-pairs contrasts for conditions with at least two biological replicates; n=2 comparisons are labelled exploratory.
 - Configurable contrast-specific pairing with complete-subject detection, mixed paired/unpaired projects, pair-specific rank validation, and resolved-formula provenance.
 - Human GRCh38 and mouse GRCm39 reference-manifest profiles using the same analysis code.
-- Lexogen QuantSeq REV SE raw-FASTQ QC, adapter/poly(A)/poly(T)/quality trimming, lane read groups, STAR alignment, technical-lane merging, mapping QC and empirical orientation checks.
+- Lexogen QuantSeq REV SE raw-FASTQ QC, adapter/poly(A)/poly(T)/quality trimming, technical-library/lane read groups, STAR alignment, technical-library/lane merging, mapping QC and empirical orientation checks.
 - Independent featureCounts and pair-specific DESeq2 gene-expression branch.
 - APA-A direct-end extraction, audit, internal-priming evidence, condition-blind PAS clustering, annotation, raw counts, DEXSeq/Delta-PAU, and PCPA classification with a tested terminal comparator.
 - Pilot-gated APA-B adapter contract, independent output validation, DRIMSeq/stageR, and branch-local PCPA classification.

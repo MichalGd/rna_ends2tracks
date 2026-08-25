@@ -6,7 +6,7 @@ import hashlib
 import itertools
 import json
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,7 +20,10 @@ class ConfigError(ValueError):
 
 REQUIRED_COLUMNS = (
     "sample_id",
+    "description",
+    "genome",
     "biological_replicate_id",
+    "technical_replicate_id",
     "lane_id",
     "fastq_r1",
     "fastq_r2",
@@ -35,6 +38,12 @@ REQUIRED_COLUMNS = (
 )
 
 SUPPORTED_SPECIES = {"human": {"GRCh38"}, "mouse": {"GRCm39"}}
+GENOME_ALIASES = {
+    "grch38": "GRCh38",
+    "hg38": "GRCh38",
+    "grcm39": "GRCm39",
+    "mm39": "GRCm39",
+}
 SUPPORTED_PROTOCOLS = {"quantseq_rev_v2_se", "quantseq_rev_v1_se"}
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SAFE_DESIGN_TERM = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
@@ -84,15 +93,28 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
         raise ConfigError("Samplesheet contains no data rows")
 
     base = path.parent
-    seen_lanes: set[tuple[str, str]] = set()
+    seen_lanes: set[tuple[str, str, str]] = set()
     sample_metadata: dict[str, tuple[str, ...]] = {}
     for line_number, row in enumerate(rows, start=2):
-        for key in ("sample_id", "biological_replicate_id", "lane_id", "condition", "kit_catalog"):
+        for key in (
+            "sample_id", "biological_replicate_id", "technical_replicate_id",
+            "lane_id", "condition", "kit_catalog",
+        ):
             if not row[key] or not SAFE_ID.fullmatch(row[key]):
                 raise ConfigError(f"Invalid {key!r} on samplesheet line {line_number}: {row[key]!r}")
-        lane_key = (row["sample_id"], row["lane_id"])
+        genome = GENOME_ALIASES.get(row["genome"].lower())
+        if genome is None:
+            raise ConfigError(
+                f"Unsupported genome on samplesheet line {line_number}: {row['genome']!r}; "
+                "supported values are GRCh38/hg38 and GRCm39/mm39"
+            )
+        row["genome"] = genome
+        lane_key = (row["sample_id"], row["technical_replicate_id"], row["lane_id"])
         if lane_key in seen_lanes:
-            raise ConfigError(f"Duplicate sample/lane pair: {lane_key[0]} / {lane_key[1]}")
+            raise ConfigError(
+                "Duplicate sample/technical-replicate/lane tuple: "
+                f"{lane_key[0]} / {lane_key[1]} / {lane_key[2]}"
+            )
         seen_lanes.add(lane_key)
         if row["umi_present"].lower() not in {"false", "no", "0"}:
             raise ConfigError(f"UMIs are unsupported; umi_present must be false (line {line_number})")
@@ -129,7 +151,7 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
                 raise ConfigError(f"Cannot read gzip FASTQ: {row['fastq_r1']}: {exc}") from exc
 
         invariant_keys = (
-            "biological_replicate_id", "condition", "batch", "subject",
+            "description", "genome", "biological_replicate_id", "condition", "batch", "subject",
             "library_protocol", "library_layout", "read_length", "kit_catalog", "umi_present",
         )
         invariant = tuple(row[key] for key in invariant_keys)
@@ -142,12 +164,36 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
 def collapse_samples(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     seen: set[str] = set()
+    technical_replicates: dict[str, set[str]] = defaultdict(set)
+    lane_counts: Counter[str] = Counter()
+    for row in rows:
+        technical_replicates[row["sample_id"]].add(row["technical_replicate_id"])
+        lane_counts[row["sample_id"]] += 1
     for row in rows:
         if row["sample_id"] in seen:
             continue
         seen.add(row["sample_id"])
-        result.append({key: value for key, value in row.items() if key not in {"lane_id", "fastq_r1", "fastq_r2"}})
+        sample = {
+            key: value for key, value in row.items()
+            if key not in {"technical_replicate_id", "lane_id", "fastq_r1", "fastq_r2"}
+        }
+        sample["technical_replicate_count"] = str(len(technical_replicates[row["sample_id"]]))
+        sample["sequencing_lane_count"] = str(lane_counts[row["sample_id"]])
+        result.append(sample)
     return result
+
+
+def validate_sample_genome(samples: list[dict[str, str]], reference: dict[str, Any]) -> None:
+    genomes = sorted({sample["genome"] for sample in samples})
+    if len(genomes) != 1:
+        raise ConfigError(
+            "A project must contain exactly one genome; observed samplesheet genomes: " + ", ".join(genomes)
+        )
+    assembly = str(reference["assembly"])
+    if genomes[0] != assembly:
+        raise ConfigError(
+            f"Samplesheet genome {genomes[0]} does not match reference-manifest assembly {assembly}"
+        )
 
 
 def generate_contrasts(samples: list[dict[str, str]], order: list[str]) -> list[dict[str, Any]]:
@@ -464,7 +510,7 @@ def build_plan(config_path: str | Path, samplesheet_path: str | Path, check_inpu
         if prior != sample["sample_id"]:
             raise ConfigError(
                 f"biological_replicate_id {sample['biological_replicate_id']} belongs to multiple sample IDs; "
-                "technical lanes must share one sample_id"
+                "technical libraries and lanes for one biological replicate must share one sample_id"
             )
     validate_design(samples, design)
     order = project.get("condition_order")
@@ -474,6 +520,7 @@ def build_plan(config_path: str | Path, samplesheet_path: str | Path, check_inpu
         raise ConfigError("condition_order must not contain duplicates")
     contrasts = resolve_contrast_designs(samples, generate_contrasts(samples, order), project)
     reference = load_reference(project, check_files=check_inputs)
+    validate_sample_genome(samples, reference)
     expected_overhang = max(int(row["read_length"]) for row in rows) - 1
     observed_overhang = reference.get("star_sjdb_overhang")
     if observed_overhang is not None and observed_overhang != expected_overhang:

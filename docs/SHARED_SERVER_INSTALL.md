@@ -15,7 +15,7 @@ For Mamba 2, ignore site/user channel configuration and enforce the Bioconda-sup
 
 ```bash
 MAMBA_CHANNEL_PRIORITY=strict mamba --no-rc env create \
-  --prefix /opt/miniconda/envs/rna_ends2tracks-0.1.0a4 \
+  --prefix /opt/miniconda/envs/rna_ends2tracks-0.1.0a5 \
   --file environment.yml
 ```
 

@@ -6,7 +6,7 @@ The same installation analyses human GRCh38 and mouse GRCm39. Species-specific b
 
 ## Implemented analysis branches
 
-- Shared per-lane FastQC, Lexogen-aware BBDuk adapter/poly(A)/poly(T)/quality trimming, post-trim QC, lane-specific STAR read groups, technical-lane merging, samtools validation, MultiQC and empirical strandedness checks.
+- Shared per-lane FastQC, Lexogen-aware BBDuk adapter/poly(A)/poly(T)/quality trimming, post-trim QC, technical-library/lane STAR read groups, merging to biological samples, samtools validation, MultiQC and empirical strandedness checks.
 - Independent exon-union featureCounts (`-s 2`) and DESeq2 analysis for every eligible condition pair.
 - APA-A exact QuantSeq REV R1 end extraction, unique-primary filtering, soft-clip audit, condition-blind clustering, site-level internal-priming evidence, GTF annotation, raw counts, DEXSeq/Delta-PAU and statistically filtered PCPA candidates.
 - Pilot-gated APA-B adapter for an independently pinned PolyAseqTrap installation, output-contract validation, DRIMSeq/stageR, and independently classified PCPA candidates.
@@ -20,7 +20,7 @@ Use Linux on a shared server or HPC system. Create the supplied Conda environmen
 
 ```bash
 mamba env create -f environment.yml
-conda activate rna_ends2tracks-0.1.0a4
+conda activate rna_ends2tracks-0.1.0a5
 python -m pip install --no-deps .
 rna-ends2tracks --version
 ```
@@ -40,8 +40,12 @@ For deployment while `cutnrun2tracks` jobs are active, follow the stricter [acti
 1. Copy `config/project.example.yaml` and `config/samplesheet.example.csv` into the project.
 2. Copy either `references/human_GRCh38.example.yaml` or `references/mouse_GRCm39.example.yaml` and replace every placeholder with a pinned, assembly-consistent asset.
 3. Set `condition_order`. For each unordered pair of conditions having at least two biological replicates, the later condition is the numerator and the earlier condition the denominator.
-4. Use one samplesheet row per sequencing lane. Repeated rows for a `sample_id` are technical lanes, never statistical replicates.
-5. Keep `umi_present: false`, `protocol.has_umi: false`, and `retain_duplicate_flagged_reads: true`.
+4. Set `genome` to `GRCh38`/`hg38` or `GRCm39`/`mm39`. Every row must resolve to one assembly, and that assembly must match the selected reference manifest.
+5. Use one row per FASTQ-producing sequencing lane. A `sample_id` is one biological analysis unit; nested `technical_replicate_id` values identify separate library preparations, and `lane_id` identifies sequencing lanes within a preparation. All rows for one `sample_id` are merged before statistical analysis.
+6. Give every independent biological unit a unique `biological_replicate_id`. Reuse `subject` across conditions only when those samples form a genuine matched biological pair.
+7. Keep `umi_present: false`, `protocol.has_umi: false`, and `retain_duplicate_flagged_reads: true`.
+
+See the [samplesheet contract](docs/SAMPLESHEET_CONTRACT.md) for the complete hierarchy, examples, genome validation, and pairing rules.
 
 For a project that mixes paired and unpaired contrasts, retain an unpaired global
 default and enable automatic contrast-specific pairing:

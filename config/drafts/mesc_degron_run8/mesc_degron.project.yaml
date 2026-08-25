@@ -17,7 +17,7 @@ statistics:
     incomplete_pair_action: error
 
 reference:
-  manifest: /opt/conda_envs/rna_ends2tracks-0.1.0a4/share/rna_ends2tracks/site-references/mouse_GRCm39_gencode_vM31.yaml
+  manifest: /opt/conda_envs/rna_ends2tracks-0.1.0a5/share/rna_ends2tracks/site-references/mouse_GRCm39_gencode_vM31.yaml
 
 protocol:
   profile: quantseq_rev_v2_se

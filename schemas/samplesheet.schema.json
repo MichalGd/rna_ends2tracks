@@ -5,13 +5,33 @@
   "type": "object",
   "additionalProperties": true,
   "required": [
-    "sample_id", "biological_replicate_id", "lane_id", "fastq_r1", "fastq_r2", "condition",
+    "sample_id", "description", "genome", "biological_replicate_id", "technical_replicate_id",
+    "lane_id", "fastq_r1", "fastq_r2", "condition",
     "batch", "subject", "library_protocol", "library_layout", "read_length", "kit_catalog", "umi_present"
   ],
   "properties": {
-    "sample_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
-    "biological_replicate_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
-    "lane_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+    "sample_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+      "description": "Biological analysis-unit ID. All technical libraries and lanes for this unit share one sample_id."
+    },
+    "description": {"type": "string", "description": "Free-text description of the biological sample."},
+    "genome": {"enum": ["GRCh38", "hg38", "GRCm39", "mm39"]},
+    "biological_replicate_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+      "description": "Independent biological replicate; it must map to exactly one sample_id."
+    },
+    "technical_replicate_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+      "description": "Library/preparation replicate nested within sample_id; technical replicates are merged before statistics."
+    },
+    "lane_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+      "description": "Sequencing lane nested within technical_replicate_id."
+    },
     "fastq_r1": {"type": "string", "pattern": "\\.(fastq|fq)\\.gz$"},
     "fastq_r2": {"const": ""},
     "condition": {"type": "string", "minLength": 1},

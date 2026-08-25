@@ -59,8 +59,9 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
 
     for lane in plan.sample_rows:
         sample = lane["sample_id"]
+        technical_replicate = lane["technical_replicate_id"]
         lane_id = lane["lane_id"]
-        token = f"{sample}.{lane_id}"
+        token = f"{sample}.{technical_replicate}.{lane_id}"
         lane_log = log_dir / "preprocess" / f"{token}.log"
         trimmed = trim_root / f"{token}.trimmed.fastq.gz"
         raw_lane_qc = raw_qc / token
@@ -84,7 +85,8 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             "--readFilesIn", str(trimmed), "--readFilesCommand", "zcat",
             "--outFileNamePrefix", star_prefix, "--outSAMtype", "BAM", "Unsorted",
             "--outSAMattributes", "NH", "HI", "AS", "nM", "NM", "MD",
-            "--outSAMattrRGline", f"ID:{lane_id}", f"SM:{sample}", f"LB:{sample}", "PL:ILLUMINA",
+            "--outSAMattrRGline", f"ID:{token}", f"SM:{sample}",
+            f"LB:{sample}.{technical_replicate}", "PL:ILLUMINA",
             "--outSAMstrandField", "intronMotif", "--quantMode", "GeneCounts",
         ], lane_log, dry_run)
         if not dry_run:
@@ -99,7 +101,7 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             fraction = reverse / informative if informative else 0.0
             threshold = float(plan.project.get("protocol", {}).get("orientation_min_fraction", 0.75))
             status = "pass" if informative < 1000 or fraction >= threshold else "fail"
-            orientation_rows.append((sample, lane_id, forward, reverse, fraction, status))
+            orientation_rows.append((sample, technical_replicate, lane_id, forward, reverse, fraction, status))
             if status == "fail":
                 raise RuntimeError(
                     f"Protocol orientation mismatch for {token}: reverse-compatible fraction {fraction:.3f} < {threshold:.3f}"
@@ -140,7 +142,10 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
         with orientation_path.open("w", encoding="utf-8", newline="") as handle:
             import csv
             writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-            writer.writerow(["sample_id", "lane_id", "star_forward_count", "star_reverse_count", "reverse_compatible_fraction", "status"])
+            writer.writerow([
+                "sample_id", "technical_replicate_id", "lane_id", "star_forward_count",
+                "star_reverse_count", "reverse_compatible_fraction", "status",
+            ])
             writer.writerows(orientation_rows)
         write_receipt("preprocess", module_dir, signature, expected, ["rna-ends2tracks", "preprocess"])
     event(log_dir, "preprocess", "dry_run" if dry_run else "completed", f"Processed {len(plan.samples)} samples")

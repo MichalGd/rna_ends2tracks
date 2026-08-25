@@ -22,7 +22,10 @@ class PreprocessOrderTests(unittest.TestCase):
                     "statistics": {"pairing": {"mode": "auto"}},
                 },
                 samples=[{"sample_id": "S1"}],
-                sample_rows=[{"sample_id": "S1", "lane_id": "L001", "fastq_r1": str(fastq)}],
+                sample_rows=[{
+                    "sample_id": "S1", "technical_replicate_id": "T01",
+                    "lane_id": "L001", "fastq_r1": str(fastq),
+                }],
                 contrasts=[],
                 reference={"star_index": str(root / "star")},
             )
@@ -65,7 +68,10 @@ class PreprocessOrderTests(unittest.TestCase):
             self.assertNotIn("project", signature_parameters)
             self.assertNotIn("statistics", signature_parameters)
             orientation = (results / "02_alignment" / "protocol_orientation.tsv").read_text(encoding="utf-8")
-            self.assertIn("S1\tL001\t10\t90\t0.9\tpass", orientation)
+            self.assertIn("S1\tT01\tL001\t10\t90\t0.9\tpass", orientation)
+            star_command = next(command for command in commands if command[0] == "STAR")
+            self.assertIn("ID:S1.T01.L001", star_command)
+            self.assertIn("LB:S1.T01", star_command)
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam").is_file())
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam.bai").is_file())
 

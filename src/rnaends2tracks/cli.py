@@ -57,7 +57,12 @@ def execute(args: argparse.Namespace) -> int:
     if args.module == "validate":
         print(json.dumps({
             "status": "valid", "species": plan.reference["species"], "assembly": plan.reference["assembly"],
-            "samples": len(plan.samples), "lanes": len(plan.sample_rows), "contrasts": len(plan.contrasts),
+            "samples": len(plan.samples),
+            "biological_replicates": len({sample["biological_replicate_id"] for sample in plan.samples}),
+            "technical_replicates": len({
+                (row["sample_id"], row["technical_replicate_id"]) for row in plan.sample_rows
+            }),
+            "lanes": len(plan.sample_rows), "contrasts": len(plan.contrasts),
             "paired_contrasts": sum(contrast.get("design_mode") == "paired" for contrast in plan.contrasts),
             "unpaired_contrasts": sum(contrast.get("design_mode") == "unpaired" for contrast in plan.contrasts),
             "results": str(results),
