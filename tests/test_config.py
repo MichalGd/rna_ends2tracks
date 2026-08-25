@@ -1,4 +1,5 @@
 import csv
+import gzip
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +57,45 @@ class ContractTests(unittest.TestCase):
             plan = build_plan(root / "project.yaml", root / "samples.csv", check_inputs=False)
             self.assertEqual(plan.reference["species"], "mouse")
             self.assertEqual(len(plan.contrasts), 1)
+
+    def test_existing_star_index_is_reused_only_when_contigs_and_lengths_match(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); star = root / "star"; star.mkdir()
+            (root / "genome.fa").write_text(">chr1\n" + "A" * 100 + "\n", encoding="utf-8")
+            (root / "genome.fa.fai").write_text("chr1\t100\t6\t100\t101\n", encoding="utf-8")
+            (root / "genes.gtf").write_text('chr1\ttest\tgene\t1\t100\t.\t+\t.\tgene_id "g1";\n', encoding="utf-8")
+            (root / "sizes").write_text("chr1\t100\n", encoding="utf-8")
+            for asset in ("Genome", "SA", "SAindex"):
+                (star / asset).write_bytes(b"index")
+            (star / "chrName.txt").write_text("chr1\n", encoding="utf-8")
+            (star / "chrLength.txt").write_text("100\n", encoding="utf-8")
+            (star / "genomeParameters.txt").write_text("versionGenome\t2.7.11b\nsjdbOverhang\t99\n", encoding="utf-8")
+            reference = {"species": "human", "assembly": "GRCh38", "fasta": "genome.fa", "gtf": "genes.gtf",
+                         "star_index": "star", "chrom_sizes": "sizes"}
+            (root / "reference.yaml").write_text(yaml.safe_dump(reference), encoding="utf-8")
+            project = {"project_id": "star_reuse", "condition_order": ["A", "B"], "design": "~ condition",
+                       "reference": {"manifest": "reference.yaml"},
+                       "protocol": {"profile": "quantseq_rev_v2_se", "has_umi": False, "retain_duplicate_flagged_reads": True}}
+            (root / "project.yaml").write_text(yaml.safe_dump(project), encoding="utf-8")
+            fields = ["sample_id", "biological_replicate_id", "lane_id", "fastq_r1", "fastq_r2", "condition", "batch",
+                      "subject", "library_protocol", "library_layout", "read_length", "kit_catalog", "umi_present"]
+            with (root / "samples.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
+                for condition in ("A", "B"):
+                    for index in (1, 2):
+                        fastq = root / f"{condition}{index}.fastq.gz"
+                        with gzip.open(fastq, "wt", encoding="ascii") as fq:
+                            fq.write("@r1\n" + "A" * 20 + "\n+\n" + "I" * 20 + "\n")
+                        row = sample(f"{condition}{index}", condition, "B1")
+                        row.update({"lane_id": "L001", "fastq_r1": str(fastq), "fastq_r2": ""})
+                        writer.writerow(row)
+            plan = build_plan(root / "project.yaml", root / "samples.csv", check_inputs=True)
+            self.assertEqual(plan.reference["star_index_version"], "2.7.11b")
+            self.assertEqual(plan.reference["star_sjdb_overhang"], 99)
+            self.assertEqual(plan.reference["_warnings"][0]["warning_code"], "STAR_INDEX_PROVENANCE_UNVERIFIED")
+            (star / "chrLength.txt").write_text("101\n", encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                build_plan(root / "project.yaml", root / "samples.csv", check_inputs=True)
 
 
 if __name__ == "__main__":

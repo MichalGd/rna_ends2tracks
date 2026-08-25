@@ -201,6 +201,8 @@ Build references in new release-specific directories. For each species:
 - make the completed directory read-only;
 - validate it with `rna-ends2tracks validate` using a small species-specific project.
 
+Before building a new STAR index, audit any existing index. Reuse is preferred when its required files are complete, contig names and lengths exactly match the chosen FASTA, FASTA/GTF provenance is documented, STAR compatibility and `sjdbOverhang` are acceptable, and the directory is immutable to users. Concurrent read-only index use is correctness-safe, although simultaneous index loading can add storage I/O. A mismatched, composite, incomplete, mutable or provenance-incompatible index must not be reused.
+
 Do not share one unversioned `GRCh38` or `GRCm39` directory among releases if files can later be replaced. Publish a new directory and update only new project manifests.
 
 ### 4.4 Versioned modulefile

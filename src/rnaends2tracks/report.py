@@ -34,6 +34,7 @@ def make_report(results: Path, force: bool = False) -> Path:
     apa_summary = _rows(results / "06_apa_comparison" / "summary.tsv")
     config = json.loads((results / "00_metadata" / "resolved_config.json").read_text(encoding="utf-8"))
     warnings = [f"{row['contrast_id']}: LOW_REPLICATION_N2 (exploratory)" for row in contrasts if row["design_status"] == "LOW_REPLICATION_N2"]
+    warnings.extend(row["message"] for row in _rows(results / "00_metadata" / "warnings.tsv"))
     lines = [
         f"# rna_ends2tracks report: {config['project_id']}", "",
         f"- Species/assembly: `{config['reference']['species']}` / `{config['reference']['assembly']}`",

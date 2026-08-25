@@ -12,6 +12,7 @@
 - Pilot-gated APA-B adapter contract, independent output validation, DRIMSeq/stageR, and branch-local PCPA classification.
 - APA catalog/effect/PCPA comparison, transcript-strand BigWigs, Markdown reporting and signature/checksum receipts.
 - Shared-server Conda environment, reference build script, schemas, examples and installation documentation.
+- Existing STAR-index structural validation, provenance warnings and read-only coexistence auditing to avoid unnecessary index rebuilding.
 
 ## Validated in this workspace
 

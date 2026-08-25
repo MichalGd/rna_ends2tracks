@@ -263,6 +263,21 @@ def load_reference(project: dict[str, Any], check_files: bool = True) -> dict[st
             raise ConfigError(f"PAS atlas does not exist: {ref['pas_atlas']}")
     if check_files:
         _validate_reference_assets(ref)
+    warnings: list[dict[str, str]] = []
+    fasta_hash = str(ref.get("fasta_sha256", "")).lower()
+    gtf_hash = str(ref.get("gtf_sha256", "")).lower()
+    index_fasta_hash = str(ref.get("star_index_fasta_sha256", "")).lower()
+    index_gtf_hash = str(ref.get("star_index_gtf_sha256", "")).lower()
+    if fasta_hash and index_fasta_hash and fasta_hash != index_fasta_hash:
+        raise ConfigError("STAR index FASTA checksum does not match the selected FASTA")
+    if gtf_hash and index_gtf_hash and gtf_hash != index_gtf_hash:
+        raise ConfigError("STAR index GTF checksum does not match the selected GTF")
+    if not (fasta_hash and gtf_hash and index_fasta_hash and index_gtf_hash):
+        warnings.append({
+            "warning_code": "STAR_INDEX_PROVENANCE_UNVERIFIED",
+            "message": "Structural compatibility can be checked, but FASTA/GTF checksums linking the STAR index to the selected references are incomplete.",
+        })
+    ref["_warnings"] = warnings
     ref.pop("_config_path", None)
     return ref
 
@@ -280,12 +295,37 @@ def _validate_reference_assets(ref: dict[str, Any]) -> None:
     if fasta_contigs != size_contigs:
         raise ConfigError("FASTA index and chromosome-size contig sets differ")
     star_dir = Path(ref["star_index"])
-    for asset in ("Genome", "SA", "chrName.txt"):
+    for asset in ("Genome", "SA", "SAindex", "chrName.txt", "chrLength.txt", "genomeParameters.txt"):
         if not (star_dir / asset).is_file():
             raise ConfigError(f"STAR index is incomplete; missing {star_dir / asset}")
     star_contigs = set((star_dir / "chrName.txt").read_text(encoding="utf-8").split())
     if star_contigs != fasta_contigs:
         raise ConfigError("STAR index and FASTA contig sets differ")
+    star_names = (star_dir / "chrName.txt").read_text(encoding="utf-8").split()
+    star_lengths_text = (star_dir / "chrLength.txt").read_text(encoding="utf-8").split()
+    if len(star_names) != len(star_lengths_text):
+        raise ConfigError("STAR chrName.txt and chrLength.txt have different row counts")
+    try:
+        star_lengths = {name: int(length) for name, length in zip(star_names, star_lengths_text)}
+        fasta_lengths = {
+            fields[0]: int(fields[1])
+            for line in fai.read_text(encoding="utf-8").splitlines()
+            if (fields := line.split("\t")) and len(fields) >= 2
+        }
+    except ValueError as exc:
+        raise ConfigError("Invalid numeric contig length in FASTA or STAR index metadata") from exc
+    if star_lengths != fasta_lengths:
+        raise ConfigError("STAR index and FASTA contig lengths differ")
+    parameters: dict[str, str] = {}
+    for line in (star_dir / "genomeParameters.txt").read_text(encoding="utf-8").splitlines():
+        key, _, value = line.strip().partition("\t")
+        if not value:
+            key, _, value = line.strip().partition(" ")
+        if key and value:
+            parameters[key] = value.strip()
+    ref["star_index_version"] = parameters.get("versionGenome", "unknown")
+    if parameters.get("sjdbOverhang", "").isdigit():
+        ref["star_sjdb_overhang"] = int(parameters["sjdbOverhang"])
     opener = gzip.open if str(ref["gtf"]).endswith(".gz") else open
     gtf_contigs: set[str] = set()
     with opener(ref["gtf"], "rt", encoding="utf-8") as handle:
@@ -342,6 +382,17 @@ def build_plan(config_path: str | Path, samplesheet_path: str | Path, check_inpu
         raise ConfigError("condition_order must not contain duplicates")
     contrasts = generate_contrasts(samples, order)
     reference = load_reference(project, check_files=check_inputs)
+    expected_overhang = max(int(row["read_length"]) for row in rows) - 1
+    observed_overhang = reference.get("star_sjdb_overhang")
+    if observed_overhang is not None and observed_overhang != expected_overhang:
+        reference["star_overhang_review"] = (
+            f"STAR sjdbOverhang={observed_overhang}; declared maximum read length suggests {expected_overhang}. "
+            "Reuse is permitted only after reviewing the splice-alignment impact."
+        )
+        reference.setdefault("_warnings", []).append({
+            "warning_code": "STAR_SJDB_OVERHANG_REVIEW",
+            "message": reference["star_overhang_review"],
+        })
     return RunPlan(project, samples, rows, contrasts, reference)
 
 
@@ -357,6 +408,7 @@ def write_plan(plan: RunPlan, outdir: str | Path) -> None:
     _write_tsv(outdir / "validated_samples.tsv", plan.samples)
     _write_tsv(outdir / "validated_lanes.tsv", plan.sample_rows)
     _write_tsv(outdir / "contrasts.tsv", plan.contrasts)
+    _write_tsv(outdir / "warnings.tsv", plan.reference.get("_warnings", []))
 
 
 def _write_tsv(path: Path, rows: list[dict[str, Any]]) -> None:

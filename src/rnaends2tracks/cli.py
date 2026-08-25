@@ -59,6 +59,7 @@ def execute(args: argparse.Namespace) -> int:
             "status": "valid", "species": plan.reference["species"], "assembly": plan.reference["assembly"],
             "samples": len(plan.samples), "lanes": len(plan.sample_rows), "contrasts": len(plan.contrasts),
             "results": str(results),
+            "warnings": plan.reference.get("_warnings", []),
         }, indent=2))
         return 0
     if args.module in {"preprocess", "all"}:

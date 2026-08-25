@@ -9,7 +9,9 @@ Read-only coexistence audit for a server with active cutnrun2tracks jobs.
 Usage:
   audit_existing_server.sh --cut-env DIR --output DIR \
     [--human-fasta FILE] [--human-gtf FILE] [--human-chrom-sizes FILE] \
-    [--mouse-fasta FILE] [--mouse-gtf FILE] [--mouse-chrom-sizes FILE]
+    [--human-star-index DIR] [--human-pas-atlas FILE] \
+    [--mouse-fasta FILE] [--mouse-gtf FILE] [--mouse-chrom-sizes FILE] \
+    [--mouse-star-index DIR] [--mouse-pas-atlas FILE]
 
 The script does not activate, clone, install, update, index, hash large files,
 change permissions, create application directories, or signal running jobs.
@@ -20,6 +22,8 @@ cut_env=""
 output=""
 human_fasta=""; human_gtf=""; human_chrom_sizes=""
 mouse_fasta=""; mouse_gtf=""; mouse_chrom_sizes=""
+human_star_index=""; mouse_star_index=""
+human_pas_atlas=""; mouse_pas_atlas=""
 while (($#)); do
   case "$1" in
     --cut-env) cut_env="$2"; shift 2 ;;
@@ -27,9 +31,13 @@ while (($#)); do
     --human-fasta) human_fasta="$2"; shift 2 ;;
     --human-gtf) human_gtf="$2"; shift 2 ;;
     --human-chrom-sizes) human_chrom_sizes="$2"; shift 2 ;;
+    --human-star-index) human_star_index="$2"; shift 2 ;;
+    --human-pas-atlas) human_pas_atlas="$2"; shift 2 ;;
     --mouse-fasta) mouse_fasta="$2"; shift 2 ;;
     --mouse-gtf) mouse_gtf="$2"; shift 2 ;;
     --mouse-chrom-sizes) mouse_chrom_sizes="$2"; shift 2 ;;
+    --mouse-star-index) mouse_star_index="$2"; shift 2 ;;
+    --mouse-pas-atlas) mouse_pas_atlas="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
@@ -93,9 +101,11 @@ reference_rows=(
   "human_fasta|$human_fasta"
   "human_gtf|$human_gtf"
   "human_chrom_sizes|$human_chrom_sizes"
+  "human_pas_atlas|$human_pas_atlas"
   "mouse_fasta|$mouse_fasta"
   "mouse_gtf|$mouse_gtf"
   "mouse_chrom_sizes|$mouse_chrom_sizes"
+  "mouse_pas_atlas|$mouse_pas_atlas"
 )
 for row in "${reference_rows[@]}"; do
   name="${row%%|*}"; path="${row#*|}"
@@ -108,11 +118,59 @@ for row in "${reference_rows[@]}"; do
   fi
 done
 
+audit_star_index() {
+  local label="$1"
+  local index_dir="$2"
+  local fasta="$3"
+  local required asset failed=0
+  [[ -n "$index_dir" ]] || return 0
+  if [[ ! -d "$index_dir" || ! -r "$index_dir" ]]; then
+    printf 'star_index\t%s\tFAIL\tmissing or unreadable directory: %s\n' "$label" "$index_dir" >> "$report"
+    return 0
+  fi
+  required=(Genome SA SAindex chrName.txt chrLength.txt genomeParameters.txt)
+  for asset in "${required[@]}"; do
+    if [[ ! -s "$index_dir/$asset" || ! -r "$index_dir/$asset" ]]; then
+      printf 'star_index\t%s_%s\tFAIL\tmissing, empty, or unreadable\n' "$label" "$asset" >> "$report"
+      failed=1
+    fi
+  done
+  ((failed == 0)) || return 0
+
+  printf 'star_index\t%s_path\tPRESENT\t%s\n' "$label" "$(readlink -f "$index_dir")" >> "$report"
+  stat -c 'star_index\t'"$label"'_asset\tINFO\t%A %U:%G %s_bytes %y %n' \
+    "$index_dir/Genome" "$index_dir/SA" "$index_dir/SAindex" >> "$report"
+  grep -E '^(versionGenome|sjdbOverhang|sjdbGTFfile|genomeFastaFiles)' \
+    "$index_dir/genomeParameters.txt" \
+    | sed $'s/^/star_index\t'"$label"'_parameter\tINFO\t/' >> "$report" || true
+
+  if [[ -n "$fasta" && -s "${fasta}.fai" ]]; then
+    awk -F '\t' '{print $1 "\t" $2}' "${fasta}.fai" > "$output/${label}.fasta_contigs.tsv"
+    paste "$index_dir/chrName.txt" "$index_dir/chrLength.txt" > "$output/${label}.star_contigs.tsv"
+    if cmp -s "$output/${label}.fasta_contigs.tsv" "$output/${label}.star_contigs.tsv"; then
+      printf 'star_index\t%s_contigs_and_lengths\tPASS\tSTAR chrName/chrLength exactly match FASTA .fai\n' "$label" >> "$report"
+    else
+      printf 'star_index\t%s_contigs_and_lengths\tFAIL\tSTAR index and FASTA .fai differ; do not reuse\n' "$label" >> "$report"
+      failed=1
+    fi
+  else
+    printf 'star_index\t%s_contigs_and_lengths\tREVIEW_REQUIRED\tFASTA .fai was not provided/readable\n' "$label" >> "$report"
+  fi
+
+  if ((failed == 0)); then
+    printf 'star_index\t%s_reuse\tCANDIDATE\tstructural checks passed; verify build commit, FASTA checksum, GTF release, STAR compatibility, sjdbOverhang, assembly, and permissions before reuse\n' "$label" >> "$report"
+  fi
+}
+
+audit_star_index human "$human_star_index" "$human_fasta"
+audit_star_index mouse "$mouse_star_index" "$mouse_fasta"
+
 cat > "$output/README.txt" <<'EOF'
 This directory contains a read-only inventory. PRESENT means only that a file,
-executable, import, or package was observed. It does not authorize using or
-modifying the cutnrun2tracks environment. FASTA/GTF/chromosome files remain
-candidates until assembly, release, contig, checksum, and license checks pass.
+executable, import, package, or STAR asset was observed. It does not authorize
+using or modifying the cutnrun2tracks environment. References and STAR indexes
+remain candidates until assembly, release, contig, sequence checksum, GTF,
+STAR-version, sjdbOverhang, provenance, permission, and license checks pass.
 EOF
 
 echo "Audit written to $report"

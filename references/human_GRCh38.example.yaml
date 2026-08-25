@@ -5,6 +5,11 @@ release: "set-explicit-release"
 fasta: /shared/references/human/GRCh38/genome.fa
 gtf: /shared/references/human/GRCh38/annotation.gtf
 star_index: /shared/references/human/GRCh38/STAR_index
+star_index_source: "existing-or-new: record immutable path, build commit, STAR version, FASTA/GTF checksums and sjdbOverhang"
+fasta_sha256: ""
+gtf_sha256: ""
+star_index_fasta_sha256: ""
+star_index_gtf_sha256: ""
 chrom_sizes: /shared/references/human/GRCh38/GRCh38.chrom.sizes
 pas_atlas: /shared/references/human/GRCh38/polyasite.bed.gz
 coordinate_convention: "FASTA/GTF genomic; BED outputs zero-based half-open"

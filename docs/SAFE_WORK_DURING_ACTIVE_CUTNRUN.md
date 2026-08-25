@@ -30,6 +30,21 @@ Reuse has two meanings:
 
 The CUT Bowtie2 indexes cannot replace STAR indexes. A new STAR index is required unless a matching, validated STAR index already exists. A PAS atlas is also expected to be new unless one is found and assembly/contig compatibility is proven.
 
+An existing STAR index is preferred over rebuilding when all of the following hold:
+
+- `Genome`, `SA`, `SAindex`, `chrName.txt`, `chrLength.txt` and `genomeParameters.txt` are complete and readable;
+- contig names and lengths exactly match the selected FASTA `.fai`;
+- an existing manifest or checksums link the index to the same FASTA sequence and intended GTF release;
+- it is an ordinary host index rather than an unintended host-plus-spike-in/composite index;
+- the recorded STAR version is compatible with the runtime STAR;
+- `sjdbOverhang` is suitable for the QuantSeq read length, or any mismatch has been scientifically reviewed;
+- the annotation release is appropriate for gene counting and splice-junction discovery; and
+- the path is immutable/read-only to workflow users.
+
+Concurrent jobs may read the same immutable STAR index without corrupting it. The remaining concern is initial shared-filesystem I/O when several aligners load a large index at once. Schedule the RNA alignment separately if the two CUT jobs are currently I/O-heavy.
+
+Reject or rebuild an index when contig names/lengths or recorded FASTA/GTF checksums differ, provenance is irrecoverable, required files are incomplete, the index is mutable, or it represents the wrong/composite assembly. An undocumented `sjdbOverhang` or different annotation is a review condition rather than an automatic rejection when all structural and sequence evidence agrees.
+
 Likely missing from the CUT environment and required in the independent RNA environment:
 
 - STAR;
@@ -77,12 +92,16 @@ bash audit_existing_server.sh \
   --human-fasta /actual/path/GRCh38.fa \
   --human-gtf /actual/path/GRCh38.annotation.gtf \
   --human-chrom-sizes /actual/path/GRCh38.chrom.sizes \
+  --human-star-index /actual/path/GRCh38_STAR_index \
+  --human-pas-atlas /actual/path/GRCh38_PAS_atlas.bed.gz \
   --mouse-fasta /actual/path/GRCm39.fa \
   --mouse-gtf /actual/path/GRCm39.annotation.gtf \
-  --mouse-chrom-sizes /actual/path/GRCm39.chrom.sizes
+  --mouse-chrom-sizes /actual/path/GRCm39.chrom.sizes \
+  --mouse-star-index /actual/path/GRCm39_STAR_index \
+  --mouse-pas-atlas /actual/path/GRCm39_PAS_atlas.bed.gz
 ```
 
-The audit intentionally does not hash large references, activate/clone/update an environment, create an index, modify permissions or signal jobs. Its output is an inventory, not an authorization to reuse an asset.
+The audit intentionally does not hash large references, load a STAR genome into memory, activate/clone/update an environment, create an index, modify permissions or signal jobs. It compares STAR contig names/lengths with an existing FASTA `.fai` and records index parameters. Its output is an inventory, not an authorization to reuse an asset.
 
 ### Step 3: inspect capacity
 
