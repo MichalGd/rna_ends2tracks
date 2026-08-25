@@ -71,6 +71,16 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             "int=f", "k=13", "ktrim=r", "useshortkmers=t", "mink=5", "qtrim=t",
             f"trimq={trimq}", f"minlength={minimum_length}", f"threads={threads}",
         ], lane_log, dry_run)
+        run(["fastqc", "--threads", str(threads), "--outdir", str(trimmed_lane_qc), str(trimmed)], lane_log, dry_run)
+        star_prefix = str(lane_prefix) + ".star."
+        run([
+            "STAR", "--runThreadN", str(threads), "--genomeDir", plan.reference["star_index"],
+            "--readFilesIn", str(trimmed), "--readFilesCommand", "zcat",
+            "--outFileNamePrefix", star_prefix, "--outSAMtype", "BAM", "Unsorted",
+            "--outSAMattributes", "NH", "HI", "AS", "nM", "NM", "MD",
+            "--outSAMattrRGline", f"ID:{lane_id}", f"SM:{sample}", f"LB:{sample}", "PL:ILLUMINA",
+            "--outSAMstrandField", "intronMotif", "--quantMode", "GeneCounts",
+        ], lane_log, dry_run)
         if not dry_run:
             count_path = Path(star_prefix + "ReadsPerGene.out.tab")
             forward = reverse = 0
@@ -88,16 +98,6 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
                 raise RuntimeError(
                     f"Protocol orientation mismatch for {token}: reverse-compatible fraction {fraction:.3f} < {threshold:.3f}"
                 )
-        run(["fastqc", "--threads", str(threads), "--outdir", str(trimmed_lane_qc), str(trimmed)], lane_log, dry_run)
-        star_prefix = str(lane_prefix) + ".star."
-        run([
-            "STAR", "--runThreadN", str(threads), "--genomeDir", plan.reference["star_index"],
-            "--readFilesIn", str(trimmed), "--readFilesCommand", "zcat",
-            "--outFileNamePrefix", star_prefix, "--outSAMtype", "BAM", "Unsorted",
-            "--outSAMattributes", "NH", "HI", "AS", "nM", "NM", "MD",
-            "--outSAMattrRGline", f"ID:{lane_id}", f"SM:{sample}", f"LB:{sample}", "PL:ILLUMINA",
-            "--outSAMstrandField", "intronMotif", "--quantMode", "GeneCounts",
-        ], lane_log, dry_run)
         run([
             "samtools", "sort", "-@", str(threads), "-o", str(lane_bam), star_prefix + "Aligned.out.bam"
         ], lane_log, dry_run)

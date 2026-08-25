@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import __version__
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -31,7 +33,7 @@ def write_receipt(module: str, output_dir: Path, signature: str, outputs: list[P
     receipt = {
         "schema_version": 1,
         "module": module,
-        "workflow_version": "0.1.0",
+        "workflow_version": __version__,
         "signature": signature,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "host": socket.gethostname(),
