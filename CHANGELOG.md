@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.4 - 2026-08-25
+
+- Added configurable contrast-specific pairing with `none`, `auto`, and `required` modes.
+- Resolve complete matched-subject contrasts to `~ subject + condition` while retaining the default unpaired formula for contrasts with disjoint subject sets.
+- Reject partially matched subjects by default and validate every resolved pair-specific design for completeness and full rank before compute.
+- Reject one-level design terms before invoking R, avoiding late `model.matrix` factor errors.
+- Fit DESeq2 independently per contrast and apply the same resolved formula to DEXSeq and DRIMSeq/stageR.
+- Record pairing status, number of pairs, design mode, and resolved formula in metadata, statistical indexes, reports, and receipts.
+- Isolated preprocessing signatures from statistical-only configuration changes so later statistical edits do not force unnecessary preprocessing reruns.
+
 ## 0.1.0-alpha.3 - 2026-08-25
 
 - Removed the incompatible Anaconda `defaults` channel and explicitly disabled implicit default channels.

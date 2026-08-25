@@ -20,7 +20,7 @@ Use Linux on a shared server or HPC system. Create the supplied Conda environmen
 
 ```bash
 mamba env create -f environment.yml
-conda activate rna_ends2tracks-0.1.0a3
+conda activate rna_ends2tracks-0.1.0a4
 python -m pip install --no-deps .
 rna-ends2tracks --version
 ```
@@ -43,7 +43,25 @@ For deployment while `cutnrun2tracks` jobs are active, follow the stricter [acti
 4. Use one samplesheet row per sequencing lane. Repeated rows for a `sample_id` are technical lanes, never statistical replicates.
 5. Keep `umi_present: false`, `protocol.has_umi: false`, and `retain_duplicate_flagged_reads: true`.
 
-Only validated single-end QuantSeq REV profiles are enabled. Paired-end REV is rejected until its R2 first-12-base behavior and end-coordinate contract receive a separate pilot. The design formula currently supports additive terms such as `~ batch + condition` or `~ subject + condition`; rank-deficient/confounded designs fail before compute.
+For a project that mixes paired and unpaired contrasts, retain an unpaired global
+default and enable automatic contrast-specific pairing:
+
+```yaml
+design: "~ condition"
+statistics:
+  pairing:
+    mode: auto
+    subject_column: subject
+    paired_design: "~ subject + condition"
+    incomplete_pair_action: error
+```
+
+Use the same non-empty `subject` value exactly once in each condition of a matched
+pair. Complete matches use the paired formula; empty or disjoint subject sets use
+the default formula. Partial matches stop validation unless explicitly configured
+to fall back to unpaired analysis.
+
+Only validated single-end QuantSeq REV profiles are enabled. Paired-end REV is rejected until its R2 first-12-base behavior and end-coordinate contract receive a separate pilot. The default design supports additive terms such as `~ batch + condition`. Optional contrast-specific pairing automatically uses `~ subject + condition` only for condition pairs containing exactly one sample for every matching subject. Contrasts with no subjects or disjoint subject sets remain unpaired; partial matches fail by default. Every resolved pair-specific formula is checked for full rank before compute and recorded in `contrasts.tsv`.
 
 ## Run
 

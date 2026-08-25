@@ -22,8 +22,14 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
     module_dir.mkdir(parents=True, exist_ok=True)
     qc_dir.mkdir(parents=True, exist_ok=True)
     inputs = [row["fastq_r1"] for row in plan.sample_rows]
-    signature = signature_for(inputs, {"module": "preprocess", "project": plan.project, "reference": plan.reference,
-                                       "lanes": plan.sample_rows})
+    signature = signature_for(inputs, {
+        "module": "preprocess",
+        "protocol": plan.project.get("protocol", {}),
+        "preprocessing": plan.project.get("preprocessing", {}),
+        "resources": plan.project.get("resources", {}),
+        "reference": plan.reference,
+        "lanes": plan.sample_rows,
+    })
     expected = [module_dir / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples]
     expected += [path.with_suffix(".bam.bai") for path in expected]
     orientation_path = module_dir / "protocol_orientation.tsv"

@@ -6,10 +6,18 @@ on:
     paths:
       - environment.yml
       - .github/workflows/environment.yml
+      - pyproject.toml
+      - src/**
+      - scripts/R/**
+      - tests/**
   pull_request:
     paths:
       - environment.yml
       - .github/workflows/environment.yml
+      - pyproject.toml
+      - src/**
+      - scripts/R/**
+      - tests/**
   workflow_dispatch:
 
 permissions:
@@ -44,3 +52,10 @@ jobs:
           bbduk.sh in=rev_smoke.fastq out=rev_smoke.trimmed.fastq ref=resources/quantseq_rev_adapters.fa int=f k=13 ktrim=r useshortkmers=t mink=5 qtrim=r trimq=10 minlength=20 threads=1
           test -s rev_smoke.trimmed.fastq
           Rscript -e 'packages <- c("DESeq2", "DEXSeq", "DRIMSeq", "stageR", "ggplot2"); stopifnot(all(vapply(packages, requireNamespace, logical(1), quietly=TRUE))); print(sessionInfo())'
+      - name: Run package and mixed-pairing integration tests
+        shell: micromamba-shell {0}
+        run: |
+          set -euo pipefail
+          python -m pip install --no-deps .
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          Rscript tests/R/deseq2_pairing_smoke.R

@@ -15,6 +15,11 @@
     "fastq_r1": {"type": "string", "pattern": "\\.(fastq|fq)\\.gz$"},
     "fastq_r2": {"const": ""},
     "condition": {"type": "string", "minLength": 1},
+    "batch": {"type": "string"},
+    "subject": {
+      "type": "string",
+      "description": "Matched biological-unit ID; repeat it once in each paired condition and leave it empty for unpaired samples."
+    },
     "library_protocol": {"enum": ["quantseq_rev_v2_se", "quantseq_rev_v1_se"]},
     "library_layout": {"const": "SE"},
     "read_length": {"type": ["integer", "string"]},

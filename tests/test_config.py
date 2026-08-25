@@ -6,7 +6,13 @@ from pathlib import Path
 
 import yaml
 
-from rnaends2tracks.config import ConfigError, build_plan, generate_contrasts, validate_design
+from rnaends2tracks.config import (
+    ConfigError,
+    build_plan,
+    generate_contrasts,
+    resolve_contrast_designs,
+    validate_design,
+)
 
 
 def sample(sample_id, condition, batch, subject=""):
@@ -18,6 +24,18 @@ def sample(sample_id, condition, batch, subject=""):
 
 
 class ContractTests(unittest.TestCase):
+    def test_repository_example_resolves_complete_pairs(self):
+        root = Path(__file__).resolve().parents[1]
+        plan = build_plan(
+            root / "config" / "project.example.yaml",
+            root / "config" / "samplesheet.example.csv",
+            check_inputs=False,
+        )
+        self.assertEqual(len(plan.contrasts), 1)
+        self.assertEqual(plan.contrasts[0]["design_mode"], "paired")
+        self.assertEqual(plan.contrasts[0]["n_pairs"], 2)
+        self.assertEqual(plan.contrasts[0]["resolved_design"], "~ subject + condition")
+
     def test_all_pairs_and_n2_warning(self):
         samples = [sample(f"{condition}_{i}", condition, f"B{i}") for condition in ("A", "B", "C") for i in (1, 2)]
         contrasts = generate_contrasts(samples, ["A", "B", "C"])
@@ -32,6 +50,75 @@ class ContractTests(unittest.TestCase):
     def test_balanced_design_passes(self):
         samples = [sample("A1", "A", "X"), sample("A2", "A", "Y"), sample("B1", "B", "X"), sample("B2", "B", "Y")]
         validate_design(samples, "~ batch + condition")
+
+    def test_one_level_design_term_fails_before_r(self):
+        samples = [sample("A1", "A", "run8"), sample("A2", "A", "run8"),
+                   sample("B1", "B", "run8"), sample("B2", "B", "run8")]
+        with self.assertRaisesRegex(ConfigError, "fewer than two levels: batch"):
+            validate_design(samples, "~ batch + condition")
+
+    def test_nested_subjects_resolve_three_paired_and_twelve_unpaired_contrasts(self):
+        samples = []
+        order = []
+        for target in ("CTCF", "RAD21", "WAPL"):
+            control = f"{target}_control"; treated = f"{target}_IAA"
+            order.extend((control, treated))
+            for replicate in (1, 2, 3):
+                subject = f"{target}_R{replicate}"
+                samples.append(sample(f"{control}_R{replicate}", control, "run8", subject))
+                samples.append(sample(f"{treated}_R{replicate}", treated, "run8", subject))
+        project = {
+            "design": "~ condition",
+            "statistics": {"pairing": {
+                "mode": "auto", "subject_column": "subject",
+                "paired_design": "~ subject + condition", "incomplete_pair_action": "error",
+            }},
+        }
+        contrasts = resolve_contrast_designs(samples, generate_contrasts(samples, order), project)
+        paired = [contrast for contrast in contrasts if contrast["design_mode"] == "paired"]
+        unpaired = [contrast for contrast in contrasts if contrast["design_mode"] == "unpaired"]
+        self.assertEqual(len(contrasts), 15)
+        self.assertEqual(
+            [contrast["contrast_id"] for contrast in paired],
+            ["CTCF_IAA_vs_CTCF_control", "RAD21_IAA_vs_RAD21_control", "WAPL_IAA_vs_WAPL_control"],
+        )
+        self.assertTrue(all(contrast["resolved_design"] == "~ subject + condition" for contrast in paired))
+        self.assertTrue(all(contrast["n_pairs"] == 3 for contrast in paired))
+        self.assertEqual(len(unpaired), 12)
+        self.assertTrue(all(contrast["resolved_design"] == "~ condition" for contrast in unpaired))
+        self.assertTrue(all(contrast["pairing_status"] == "disjoint_subjects" for contrast in unpaired))
+
+    def test_incomplete_pairing_fails_in_auto_error_mode(self):
+        samples = [
+            sample("A1", "A", "run8", "S1"), sample("A2", "A", "run8", "S2"),
+            sample("B1", "B", "run8", "S1"), sample("B2", "B", "run8", "S3"),
+        ]
+        project = {
+            "design": "~ condition",
+            "statistics": {"pairing": {"mode": "auto", "incomplete_pair_action": "error"}},
+        }
+        with self.assertRaisesRegex(ConfigError, "Incomplete subject pairing"):
+            resolve_contrast_designs(samples, generate_contrasts(samples, ["A", "B"]), project)
+
+    def test_pairing_none_preserves_legacy_unpaired_design(self):
+        samples = [
+            sample("A1", "A", "run8", "S1"), sample("A2", "A", "run8", "S2"),
+            sample("B1", "B", "run8", "S1"), sample("B2", "B", "run8", "S2"),
+        ]
+        project = {"design": "~ condition", "statistics": {"pairing": {"mode": "none"}}}
+        contrast = resolve_contrast_designs(samples, generate_contrasts(samples, ["A", "B"]), project)[0]
+        self.assertTrue(contrast["paired"])
+        self.assertEqual(contrast["design_mode"], "unpaired")
+        self.assertEqual(contrast["resolved_design"], "~ condition")
+
+    def test_pairing_column_must_be_a_valid_formula_term(self):
+        samples = [sample("A1", "A", "X"), sample("A2", "A", "Y"),
+                   sample("B1", "B", "X"), sample("B2", "B", "Y")]
+        project = {"design": "~ condition", "statistics": {"pairing": {
+            "mode": "auto", "subject_column": "subject-id",
+        }}}
+        with self.assertRaisesRegex(ConfigError, "safe column name"):
+            resolve_contrast_designs(samples, generate_contrasts(samples, ["A", "B"]), project)
 
     def test_mouse_project_and_no_umi_contract(self):
         with tempfile.TemporaryDirectory() as temporary:

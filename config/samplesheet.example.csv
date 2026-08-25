@@ -1,6 +1,6 @@
 sample_id,biological_replicate_id,lane_id,fastq_r1,fastq_r2,condition,batch,subject,library_protocol,library_layout,read_length,kit_catalog,umi_present
-CTRL_01,CTRL_01,L001,/data/project/CTRL_01_L001_R1.fastq.gz,,control,B1,,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
-CTRL_01,CTRL_01,L002,/data/project/CTRL_01_L002_R1.fastq.gz,,control,B1,,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
-CTRL_02,CTRL_02,L001,/data/project/CTRL_02_L001_R1.fastq.gz,,control,B2,,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
-TRT_01,TRT_01,L001,/data/project/TRT_01_L001_R1.fastq.gz,,treatment,B1,,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
-TRT_02,TRT_02,L001,/data/project/TRT_02_L001_R1.fastq.gz,,treatment,B2,,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
+CTRL_01,CTRL_01,L001,/data/project/CTRL_01_L001_R1.fastq.gz,,control,B1,PAIR_01,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
+CTRL_01,CTRL_01,L002,/data/project/CTRL_01_L002_R1.fastq.gz,,control,B1,PAIR_01,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
+CTRL_02,CTRL_02,L001,/data/project/CTRL_02_L001_R1.fastq.gz,,control,B2,PAIR_02,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
+TRT_01,TRT_01,L001,/data/project/TRT_01_L001_R1.fastq.gz,,treatment,B1,PAIR_01,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false
+TRT_02,TRT_02,L001,/data/project/TRT_02_L001_R1.fastq.gz,,treatment,B2,PAIR_02,quantseq_rev_v2_se,SE,100,QuantSeq_REV_V2,false

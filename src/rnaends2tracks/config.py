@@ -6,6 +6,7 @@ import hashlib
 import itertools
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ REQUIRED_COLUMNS = (
 SUPPORTED_SPECIES = {"human": {"GRCh38"}, "mouse": {"GRCm39"}}
 SUPPORTED_PROTOCOLS = {"quantseq_rev_v2_se", "quantseq_rev_v1_se"}
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+SAFE_DESIGN_TERM = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
 
 
 @dataclass(frozen=True)
@@ -165,9 +167,8 @@ def generate_contrasts(samples: list[dict[str, str]], order: list[str]) -> list[
     for denominator, numerator in itertools.combinations(eligible, 2):
         n_num = len(by_condition[numerator])
         n_den = len(by_condition[denominator])
-        numerator_subjects = {s.get("subject", "") for s in samples if s["condition"] == numerator}
-        denominator_subjects = {s.get("subject", "") for s in samples if s["condition"] == denominator}
-        paired = bool(numerator_subjects) and "" not in numerator_subjects and numerator_subjects == denominator_subjects
+        pairing_status, n_pairs = _pairing_state(samples, numerator, denominator, "subject")
+        paired = pairing_status == "complete"
         contrasts.append({
             "contrast_id": f"{numerator}_vs_{denominator}",
             "factor": "condition",
@@ -176,9 +177,98 @@ def generate_contrasts(samples: list[dict[str, str]], order: list[str]) -> list[
             "n_num": n_num,
             "n_den": n_den,
             "paired": paired,
+            "n_pairs": n_pairs,
+            "pairing_status": pairing_status,
             "design_status": "LOW_REPLICATION_N2" if min(n_num, n_den) == 2 else "valid",
         })
     return contrasts
+
+
+def _pairing_state(
+    samples: list[dict[str, str]], numerator: str, denominator: str, subject_column: str,
+) -> tuple[str, int]:
+    numerator_values = [sample.get(subject_column, "").strip() for sample in samples if sample["condition"] == numerator]
+    denominator_values = [sample.get(subject_column, "").strip() for sample in samples if sample["condition"] == denominator]
+    numerator_nonempty = [value for value in numerator_values if value]
+    denominator_nonempty = [value for value in denominator_values if value]
+    if not numerator_nonempty and not denominator_nonempty:
+        return "no_subjects", 0
+    if len(numerator_nonempty) != len(numerator_values) or len(denominator_nonempty) != len(denominator_values):
+        return "incomplete", 0
+    numerator_counts = Counter(numerator_nonempty)
+    denominator_counts = Counter(denominator_nonempty)
+    if set(numerator_counts).isdisjoint(denominator_counts):
+        return "disjoint_subjects", 0
+    if numerator_counts == denominator_counts and all(count == 1 for count in numerator_counts.values()):
+        return "complete", len(numerator_counts)
+    return "incomplete", 0
+
+
+def resolve_contrast_designs(
+    samples: list[dict[str, str]], contrasts: list[dict[str, Any]], project: dict[str, Any],
+) -> list[dict[str, Any]]:
+    statistics = project.get("statistics", {})
+    if not isinstance(statistics, dict):
+        raise ConfigError("statistics must be a mapping")
+    pairing = statistics.get("pairing", {})
+    if not isinstance(pairing, dict):
+        raise ConfigError("statistics.pairing must be a mapping")
+    mode = str(pairing.get("mode", "none")).lower()
+    if mode not in {"none", "auto", "required"}:
+        raise ConfigError("statistics.pairing.mode must be one of: none, auto, required")
+    subject_column = str(pairing.get("subject_column", "subject")).strip()
+    if not SAFE_DESIGN_TERM.fullmatch(subject_column):
+        raise ConfigError("statistics.pairing.subject_column must be a safe column name")
+    paired_design = str(pairing.get("paired_design", f"~ {subject_column} + condition")).strip()
+    incomplete_action = str(pairing.get("incomplete_pair_action", "error")).lower()
+    if incomplete_action not in {"error", "unpaired"}:
+        raise ConfigError("statistics.pairing.incomplete_pair_action must be 'error' or 'unpaired'")
+    default_design = str(project["design"])
+    if mode != "none":
+        variables = _design_variables(paired_design)
+        if "condition" not in variables or subject_column not in variables:
+            raise ConfigError(
+                "statistics.pairing.paired_design must contain condition and the configured subject column"
+            )
+        if any(subject_column not in sample for sample in samples):
+            raise ConfigError(f"Pairing column is absent from samplesheet: {subject_column}")
+
+    resolved: list[dict[str, Any]] = []
+    for original in contrasts:
+        contrast = dict(original)
+        status, n_pairs = _pairing_state(
+            samples, str(contrast["numerator"]), str(contrast["denominator"]), subject_column,
+        )
+        metadata_paired = status == "complete"
+        design_mode = "unpaired"
+        formula = default_design
+        if mode == "required" and not metadata_paired:
+            raise ConfigError(
+                f"Complete pairing is required for {contrast['contrast_id']}; observed pairing status: {status}"
+            )
+        if mode in {"auto", "required"} and metadata_paired:
+            design_mode = "paired"
+            formula = paired_design
+        elif mode == "auto" and status == "incomplete" and incomplete_action == "error":
+            raise ConfigError(
+                f"Incomplete subject pairing for {contrast['contrast_id']}; fix subject IDs or set "
+                "statistics.pairing.incomplete_pair_action: unpaired"
+            )
+        subset = [
+            sample for sample in samples
+            if sample["condition"] in {contrast["numerator"], contrast["denominator"]}
+        ]
+        validate_design(subset, formula)
+        contrast.update({
+            "paired": metadata_paired,
+            "n_pairs": n_pairs if metadata_paired else 0,
+            "pairing_status": status,
+            "design_mode": design_mode,
+            "resolved_design": formula,
+            "pairing_column": subject_column if design_mode == "paired" else "",
+        })
+        resolved.append(contrast)
+    return resolved
 
 
 def _design_variables(design: str) -> list[str]:
@@ -189,7 +279,7 @@ def _design_variables(design: str) -> list[str]:
     if not variables:
         raise ConfigError("Design formula contains no variables")
     for variable in variables:
-        if not SAFE_ID.fullmatch(variable):
+        if not SAFE_DESIGN_TERM.fullmatch(variable):
             raise ConfigError(f"Unsupported design term: {variable!r}")
     return variables
 
@@ -224,6 +314,8 @@ def validate_design(samples: list[dict[str, str]], design: str) -> None:
         if any(value == "" for value in values):
             raise ConfigError(f"Design variable has missing values: {variable}")
         levels = sorted(set(values))
+        if len(levels) < 2:
+            raise ConfigError(f"Design variable has fewer than two levels: {variable}")
         for level in levels[1:]:
             for row, value in zip(columns, values):
                 row.append(float(value == level))
@@ -380,7 +472,7 @@ def build_plan(config_path: str | Path, samplesheet_path: str | Path, check_inpu
         raise ConfigError("condition_order must be an explicit YAML list")
     if len(order) != len(set(order)):
         raise ConfigError("condition_order must not contain duplicates")
-    contrasts = generate_contrasts(samples, order)
+    contrasts = resolve_contrast_designs(samples, generate_contrasts(samples, order), project)
     reference = load_reference(project, check_files=check_inputs)
     expected_overhang = max(int(row["read_length"]) for row in rows) - 1
     observed_overhang = reference.get("star_sjdb_overhang")

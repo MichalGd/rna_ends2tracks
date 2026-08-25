@@ -40,10 +40,18 @@ def make_report(results: Path, force: bool = False) -> Path:
         f"- Species/assembly: `{config['reference']['species']}` / `{config['reference']['assembly']}`",
         f"- Protocol: `{config['protocol']['profile']}`", f"- Biological samples: {len(samples)}",
         f"- Pairwise contrasts: {len(contrasts)}", "- UMI processing: disabled", "- Coordinate deduplication: disabled", "",
-        "## Contrasts", "", "| Contrast | Numerator | Denominator | Replicates | Status |", "|---|---:|---:|---:|---|",
+        "## Contrasts", "",
+        "| Contrast | Numerator | Denominator | Replicates | Mode | Resolved design | Status |",
+        "|---|---:|---:|---:|---|---|---|",
     ]
     for row in contrasts:
-        lines.append(f"| {row['contrast_id']} | {row['numerator']} | {row['denominator']} | {row['n_num']} / {row['n_den']} | {row['design_status']} |")
+        mode = row.get("design_mode", "legacy")
+        design = row.get("resolved_design", config.get("design", "~ condition"))
+        pairs = f"; {row.get('n_pairs', '0')} pairs" if mode == "paired" else ""
+        lines.append(
+            f"| {row['contrast_id']} | {row['numerator']} | {row['denominator']} | "
+            f"{row['n_num']} / {row['n_den']}{pairs} | {mode} | `{design}` | {row['design_status']} |"
+        )
     lines += ["", "## APA method reconciliation", ""]
     if apa_summary:
         for row in apa_summary:

@@ -9,7 +9,7 @@ catalog <- read.delim(get_arg("--catalog"), check.names=FALSE, stringsAsFactors=
 samples <- read.delim(get_arg("--samples"), check.names=FALSE, stringsAsFactors=FALSE)
 contrasts <- read.delim(get_arg("--contrasts"), check.names=FALSE, stringsAsFactors=FALSE)
 outdir <- get_arg("--outdir"); min_count <- as.integer(get_arg("--min-count", "5"))
-design_text <- get_arg("--design", "~ condition")
+default_design_text <- get_arg("--design", "~ condition")
 dir.create(outdir, recursive=TRUE, showWarnings=FALSE)
 meta <- merge(catalog[, c("pas_id", "gene_id")], counts_df[, "pas_id", drop=FALSE], by="pas_id", sort=FALSE)
 rownames(counts_df) <- counts_df$pas_id
@@ -20,9 +20,22 @@ for (i in seq_len(nrow(contrasts))) {
   sample_data <- samples[match(keep_samples, samples$sample_id), , drop=FALSE]
   rownames(sample_data) <- sample_data$sample_id
   sample_data$condition <- relevel(factor(sample_data$condition), ref=con$denominator)
+  design_text <- default_design_text
+  if ("resolved_design" %in% colnames(contrasts) && !is.na(con$resolved_design) && nzchar(con$resolved_design)) {
+    design_text <- con$resolved_design
+  }
   design_variables <- all.vars(as.formula(design_text))
   covariates <- setdiff(design_variables, "condition")
-  for (variable in design_variables) sample_data[[variable]] <- factor(sample_data[[variable]])
+  missing <- setdiff(design_variables, colnames(sample_data))
+  if (length(missing)) stop(paste("Design columns missing for", con$contrast_id, ":", paste(missing, collapse=", ")))
+  for (variable in design_variables) {
+    if (any(is.na(sample_data[[variable]]) | sample_data[[variable]] == "")) {
+      stop(paste("Missing design value for", con$contrast_id, ":", variable))
+    }
+    if (variable != "condition") sample_data[[variable]] <- factor(sample_data[[variable]])
+  }
+  pair_design <- model.matrix(as.formula(design_text), data=sample_data)
+  if (qr(pair_design)$rank < ncol(pair_design)) stop(paste("Pair-specific design is not full rank:", con$contrast_id))
   covariate_terms <- if (length(covariates)) paste0(covariates, ":exon") else character(0)
   full_formula <- as.formula(paste("~ sample + exon", paste(c(covariate_terms, "condition:exon"), collapse=" + "), sep=" + "))
   reduced_formula <- as.formula(paste("~ sample + exon", paste(covariate_terms, collapse=" + "), sep=if (length(covariate_terms)) " + " else ""))
@@ -53,7 +66,14 @@ for (i in seq_len(nrow(contrasts))) {
   result <- result[, c("pas_id", setdiff(colnames(result), "pas_id"))]
   target <- file.path(outdir, paste0(con$contrast_id, ".dexseq.tsv"))
   write.table(result, target, sep="\t", quote=FALSE, row.names=FALSE)
-  index[[length(index)+1]] <- data.frame(contrast_id=con$contrast_id, result_file=target,
-    tested_sites=nrow(result), significant_sites=sum(!is.na(result$padj) & result$padj < 0.05), warning=con$design_status)
+  index[[length(index)+1]] <- data.frame(
+    contrast_id=con$contrast_id, result_file=target, tested_sites=nrow(result),
+    significant_sites=sum(!is.na(result$padj) & result$padj < 0.05),
+    design_mode=if ("design_mode" %in% colnames(contrasts)) con$design_mode else "legacy",
+    resolved_design=design_text,
+    paired=if ("paired" %in% colnames(contrasts)) con$paired else FALSE,
+    n_pairs=if ("n_pairs" %in% colnames(contrasts)) con$n_pairs else 0,
+    warning=con$design_status, check.names=FALSE
+  )
 }
 write.table(do.call(rbind, index), file.path(outdir, "result_index.tsv"), sep="\t", quote=FALSE, row.names=FALSE)

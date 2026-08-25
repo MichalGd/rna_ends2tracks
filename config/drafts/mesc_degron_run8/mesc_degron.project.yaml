@@ -1,0 +1,51 @@
+project_id: mesc_degron_run8
+output_dir: ~/Analysis/mesc_degron_run8_rna_ends2tracks
+condition_order:
+  - CTCF_control
+  - CTCF_IAA
+  - RAD21_control
+  - RAD21_IAA
+  - WAPL_control
+  - WAPL_IAA
+design: "~ condition"
+
+statistics:
+  pairing:
+    mode: auto
+    subject_column: subject
+    paired_design: "~ subject + condition"
+    incomplete_pair_action: error
+
+reference:
+  manifest: /opt/conda_envs/rna_ends2tracks-0.1.0a4/share/rna_ends2tracks/site-references/mouse_GRCm39_gencode_vM31.yaml
+
+protocol:
+  profile: quantseq_rev_v2_se
+  has_umi: false
+  retain_duplicate_flagged_reads: true
+  orientation_min_fraction: 0.75
+
+preprocessing:
+  trim_quality: 10
+  minimum_length: 20
+  bbduk_reference: adapters,polyA_T
+
+resources:
+  threads: 12
+  memory_gb: 48
+
+apa_a:
+  min_reads: 5
+  min_samples: 2
+  cluster_gap_nt: 24
+  max_known_pas_distance_nt: 24
+  internal_priming_a_fraction: 0.70
+  internal_priming_a_run: 6
+
+apa_b:
+  enabled: false
+  pilot_accepted: false
+
+reporting:
+  fdr: 0.05
+  min_abs_delta_pau: 0.10

@@ -19,6 +19,7 @@ class PreprocessOrderTests(unittest.TestCase):
                     "resources": {"threads": 1},
                     "preprocessing": {"minimum_length": 20, "trim_quality": 10},
                     "protocol": {"orientation_min_fraction": 0.75},
+                    "statistics": {"pairing": {"mode": "auto"}},
                 },
                 samples=[{"sample_id": "S1"}],
                 sample_rows=[{"sample_id": "S1", "lane_id": "L001", "fastq_r1": str(fastq)}],
@@ -51,6 +52,7 @@ class PreprocessOrderTests(unittest.TestCase):
                 patch("rnaends2tracks.preprocess.require_tools"),
                 patch("rnaends2tracks.preprocess.run", side_effect=fake_run),
                 patch("rnaends2tracks.preprocess.write_receipt"),
+                patch("rnaends2tracks.preprocess.signature_for", return_value="signature") as signature_mock,
                 patch("subprocess.run"),
             ):
                 preprocess(plan, results)
@@ -59,6 +61,9 @@ class PreprocessOrderTests(unittest.TestCase):
             bbduk_command = next(command for command in commands if command[0] == "bbduk.sh")
             self.assertIn("qtrim=r", bbduk_command)
             self.assertNotIn("qtrim=t", bbduk_command)
+            signature_parameters = signature_mock.call_args.args[1]
+            self.assertNotIn("project", signature_parameters)
+            self.assertNotIn("statistics", signature_parameters)
             orientation = (results / "02_alignment" / "protocol_orientation.tsv").read_text(encoding="utf-8")
             self.assertIn("S1\tL001\t10\t90\t0.9\tpass", orientation)
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam").is_file())

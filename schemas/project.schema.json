@@ -26,6 +26,20 @@
         "retain_duplicate_flagged_reads": {"const": true}
       }
     },
+    "statistics": {
+      "type": "object",
+      "properties": {
+        "pairing": {
+          "type": "object",
+          "properties": {
+            "mode": {"enum": ["none", "auto", "required"]},
+            "subject_column": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$"},
+            "paired_design": {"type": "string", "pattern": "condition"},
+            "incomplete_pair_action": {"enum": ["error", "unpaired"]}
+          }
+        }
+      }
+    },
     "apa_b": {
       "type": "object",
       "properties": {

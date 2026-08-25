@@ -1,4 +1,4 @@
-name: rna_ends2tracks-0.1.0a3
+name: rna_ends2tracks-0.1.0a4
 channels:
   - conda-forge
   - bioconda

@@ -58,6 +58,8 @@ def execute(args: argparse.Namespace) -> int:
         print(json.dumps({
             "status": "valid", "species": plan.reference["species"], "assembly": plan.reference["assembly"],
             "samples": len(plan.samples), "lanes": len(plan.sample_rows), "contrasts": len(plan.contrasts),
+            "paired_contrasts": sum(contrast.get("design_mode") == "paired" for contrast in plan.contrasts),
+            "unpaired_contrasts": sum(contrast.get("design_mode") == "unpaired" for contrast in plan.contrasts),
             "results": str(results),
             "warnings": plan.reference.get("_warnings", []),
         }, indent=2))

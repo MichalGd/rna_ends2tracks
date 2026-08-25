@@ -9,7 +9,7 @@ catalog <- read.delim(get_arg("--catalog"), check.names=FALSE, stringsAsFactors=
 samples_all <- read.delim(get_arg("--samples"), check.names=FALSE, stringsAsFactors=FALSE)
 contrasts <- read.delim(get_arg("--contrasts"), check.names=FALSE, stringsAsFactors=FALSE)
 outdir <- get_arg("--outdir"); alpha <- as.numeric(get_arg("--fdr", "0.05"))
-design_text <- get_arg("--design", "~ condition")
+default_design_text <- get_arg("--design", "~ condition")
 dir.create(outdir, recursive=TRUE, showWarnings=FALSE)
 rownames(counts_wide) <- counts_wide$pas_id
 sample_columns <- intersect(samples_all$sample_id, colnames(counts_wide))
@@ -18,10 +18,21 @@ gene_ids <- catalog$gene_id[match(rownames(matrix_all), catalog$pas_id)]
 index <- list()
 for (i in seq_len(nrow(contrasts))) {
   con <- contrasts[i, ]; keep <- samples_all$condition %in% c(con$denominator, con$numerator)
+  design_text <- default_design_text
+  if ("resolved_design" %in% colnames(contrasts) && !is.na(con$resolved_design) && nzchar(con$resolved_design)) {
+    design_text <- con$resolved_design
+  }
   design_variables <- all.vars(as.formula(design_text))
+  missing <- setdiff(design_variables, colnames(samples_all))
+  if (length(missing)) stop(paste("Design columns missing for", con$contrast_id, ":", paste(missing, collapse=", ")))
   samples <- samples_all[keep, unique(c("sample_id", design_variables)), drop=FALSE]
   samples$condition <- relevel(factor(samples$condition), ref=con$denominator)
-  for (variable in setdiff(design_variables, "condition")) samples[[variable]] <- factor(samples[[variable]])
+  for (variable in design_variables) {
+    if (any(is.na(samples[[variable]]) | samples[[variable]] == "")) {
+      stop(paste("Missing design value for", con$contrast_id, ":", variable))
+    }
+    if (variable != "condition") samples[[variable]] <- factor(samples[[variable]])
+  }
   mat <- matrix_all[, samples$sample_id, drop=FALSE]
   counts <- data.frame(gene_id=gene_ids, feature_id=rownames(mat), mat, check.names=FALSE)
   counts <- counts[counts$gene_id != "" & !is.na(counts$gene_id), , drop=FALSE]
@@ -59,7 +70,14 @@ for (i in seq_len(nrow(contrasts))) {
   target <- file.path(outdir, paste0(con$contrast_id, ".drimseq_stager.tsv"))
   write.table(feature_result, target, sep="\t", quote=FALSE, row.names=FALSE)
   write.table(gene_result, file.path(outdir, paste0(con$contrast_id, ".gene_screen.tsv")), sep="\t", quote=FALSE, row.names=FALSE)
-  index[[length(index)+1]] <- data.frame(contrast_id=con$contrast_id, result_file=target,
-    tested_sites=nrow(feature_result), confirmed_sites=sum(!is.na(feature_result$stageR_adjusted) & feature_result$stageR_adjusted < alpha), warning=con$design_status)
+  index[[length(index)+1]] <- data.frame(
+    contrast_id=con$contrast_id, result_file=target, tested_sites=nrow(feature_result),
+    confirmed_sites=sum(!is.na(feature_result$stageR_adjusted) & feature_result$stageR_adjusted < alpha),
+    design_mode=if ("design_mode" %in% colnames(contrasts)) con$design_mode else "legacy",
+    resolved_design=design_text,
+    paired=if ("paired" %in% colnames(contrasts)) con$paired else FALSE,
+    n_pairs=if ("n_pairs" %in% colnames(contrasts)) con$n_pairs else 0,
+    warning=con$design_status, check.names=FALSE
+  )
 }
 write.table(do.call(rbind, index), file.path(outdir, "result_index.tsv"), sep="\t", quote=FALSE, row.names=FALSE)

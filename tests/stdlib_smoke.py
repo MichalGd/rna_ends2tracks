@@ -22,7 +22,7 @@ pysam_stub.AlignedSegment = object
 sys.modules.setdefault("pysam", pysam_stub)
 
 from rnaends2tracks.apa_a import reverse_complement, transcript_end
-from rnaends2tracks.config import ConfigError, generate_contrasts, validate_design
+from rnaends2tracks.config import ConfigError, generate_contrasts, resolve_contrast_designs, validate_design
 
 
 class Read:
@@ -44,6 +44,15 @@ assert reverse_complement("AACGT") == "ACGTT"
 balanced = [sample("A1", "A", "X"), sample("A2", "A", "Y"), sample("B1", "B", "X"), sample("B2", "B", "Y")]
 validate_design(balanced, "~ batch + condition")
 assert generate_contrasts(balanced, ["A", "B"])[0]["contrast_id"] == "B_vs_A"
+paired = [sample("A1", "A", "X"), sample("A2", "A", "X"), sample("B1", "B", "X"), sample("B2", "B", "X")]
+paired[0]["subject"] = paired[2]["subject"] = "S1"
+paired[1]["subject"] = paired[3]["subject"] = "S2"
+resolved = resolve_contrast_designs(
+    paired, generate_contrasts(paired, ["A", "B"]),
+    {"design": "~ condition", "statistics": {"pairing": {"mode": "auto"}}},
+)[0]
+assert resolved["design_mode"] == "paired"
+assert resolved["resolved_design"] == "~ subject + condition"
 confounded = [sample("A1", "A", "X"), sample("A2", "A", "X"), sample("B1", "B", "Y"), sample("B2", "B", "Y")]
 try:
     validate_design(confounded, "~ batch + condition")

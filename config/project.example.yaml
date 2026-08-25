@@ -3,6 +3,15 @@ output_dir: ../results/example
 condition_order: [control, treatment]
 design: "~ batch + condition"
 
+statistics:
+  pairing:
+    # auto uses the paired formula only when both contrast conditions contain
+    # exactly one sample for every matching non-empty subject ID.
+    mode: auto
+    subject_column: subject
+    paired_design: "~ subject + condition"
+    incomplete_pair_action: error
+
 reference:
   # Select exactly one matching manifest. Both species use the same workflow code.
   manifest: ../references/human_GRCh38.example.yaml
