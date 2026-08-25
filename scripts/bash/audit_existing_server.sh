@@ -50,11 +50,13 @@ report="$output/coexistence_audit.tsv"
 processes="$output/running_cutnrun_processes.txt"
 packages="$output/cut_environment_packages.txt"
 
-printf 'section\titem\tstatus\tdetail\n' > "$report"
-printf 'system\ttimestamp\tINFO\t%s\n' "$(date --iso-8601=seconds)" >> "$report"
-printf 'system\thost\tINFO\t%s\n' "$(hostname -f 2>/dev/null || hostname)" >> "$report"
-printf 'system\tload\tINFO\t%s\n' "$(uptime | tr '\t' ' ')" >> "$report"
-printf 'system\tdisk\tINFO\t%s\n' "$(df -Pk "$output" | tail -n 1 | tr '\t' ' ')" >> "$report"
+{
+  printf 'section\titem\tstatus\tdetail\n'
+  printf 'system\ttimestamp\tINFO\t%s\n' "$(date --iso-8601=seconds)"
+  printf 'system\thost\tINFO\t%s\n' "$(hostname -f 2>/dev/null || hostname)"
+  printf 'system\tload\tINFO\t%s\n' "$(uptime | tr '\t' ' ')"
+  printf 'system\tdisk\tINFO\t%s\n' "$(df -Pk "$output" | tail -n 1 | tr '\t' ' ')"
+} > "$report"
 
 ps -eo pid,ppid,user,lstart,etime,stat,args --width 300 | \
   awk 'NR==1 || /cutnrun2tracks|preprocess_batch|align_batch|peakcall_batch|differential_batch|coverage_batch/ {print}' \
