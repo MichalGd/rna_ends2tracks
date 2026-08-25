@@ -20,7 +20,7 @@ Use Linux on a shared server or HPC system. Create the supplied Conda environmen
 
 ```bash
 mamba env create -f environment.yml
-conda activate rna_ends2tracks-0.1.0a2
+conda activate rna_ends2tracks-0.1.0a3
 python -m pip install --no-deps .
 rna-ends2tracks --version
 ```

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.3 - 2026-08-25
+
+- Removed the incompatible Anaconda `defaults` channel and explicitly disabled implicit default channels.
+- Updated the samtools pin from 1.20 to 1.21 to satisfy the BBMap 39.13 runtime contract.
+- Added a Linux CI job that creates the complete Conda environment with strict Bioconda/conda-forge channel priority and verifies required Python, R and command-line tools.
+
+The corrected specification was first dry-run solved with Mamba 2.8.0 on the target `biolserv` server: 386 packages and approximately 450 MB of downloads.
+
 ## 0.1.0-alpha.2 - 2026-08-25
 
 - Fixed the non-dry-run preprocessing order so the QuantSeq REV orientation check reads STAR gene-count output only after STAR finishes.

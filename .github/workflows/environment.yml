@@ -1,0 +1,43 @@
+name: Complete environment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - environment.yml
+      - .github/workflows/environment.yml
+  pull_request:
+    paths:
+      - environment.yml
+      - .github/workflows/environment.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-environment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-file: environment.yml
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: strict
+          cache-downloads: true
+          cache-environment: true
+          post-cleanup: all
+      - name: Verify required tools and packages
+        shell: micromamba-shell {0}
+        run: |
+          set -euo pipefail
+          command -v python STAR samtools featureCounts bbduk.sh fastqc multiqc bedtools bedGraphToBigWig Rscript
+          python -c 'import yaml, pysam; print(yaml.__version__, pysam.__version__)'
+          STAR --version
+          samtools --version
+          featureCounts -v
+          Rscript -e 'packages <- c("DESeq2", "DEXSeq", "DRIMSeq", "stageR", "ggplot2"); stopifnot(all(vapply(packages, requireNamespace, logical(1), quietly=TRUE))); print(sessionInfo())'

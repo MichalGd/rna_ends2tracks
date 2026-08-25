@@ -1,8 +1,8 @@
-name: rna_ends2tracks-0.1.0a2
+name: rna_ends2tracks-0.1.0a3
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  - nodefaults
 dependencies:
   - python=3.11
   - pip
@@ -12,7 +12,7 @@ dependencies:
   - multiqc=1.25
   - bbmap=39.13
   - star=2.7.11b
-  - samtools=1.20
+  - samtools=1.21
   - subread=2.0.8
   - r-base=4.4
   - bioconductor-deseq2=1.46

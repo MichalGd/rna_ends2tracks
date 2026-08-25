@@ -11,6 +11,14 @@ The workflow contains no usernames, home-directory assumptions or fixed project 
 5. Give the server user group read/execute access to software and references. Users need write access only to their own output and scheduler-log directories.
 6. Expose the environment with the site module system or a small launcher. Do not modify users' shell startup files.
 
+For Mamba 2, ignore site/user channel configuration and enforce the Bioconda-supported strict channel order without modifying anyone's `.condarc`:
+
+```bash
+MAMBA_CHANNEL_PRIORITY=strict mamba --no-rc env create \
+  --prefix /opt/miniconda/envs/rna_ends2tracks-0.1.0a3 \
+  --file environment.yml
+```
+
 Example Lmod modulefile logic:
 
 ```lua
