@@ -26,11 +26,13 @@ class PreprocessOrderTests(unittest.TestCase):
                 reference={"star_index": str(root / "star")},
             )
             calls = []
+            commands = []
 
             def fake_run(command, _log, dry_run=False, cwd=None):
                 self.assertFalse(dry_run)
                 self.assertIsNone(cwd)
                 calls.append(command[0])
+                commands.append(command)
                 if command[0] == "bbduk.sh":
                     output = next(value[4:] for value in command if value.startswith("out="))
                     Path(output).write_bytes(b"trimmed")
@@ -54,6 +56,9 @@ class PreprocessOrderTests(unittest.TestCase):
                 preprocess(plan, results)
 
             self.assertLess(calls.index("STAR"), calls.index("samtools"))
+            bbduk_command = next(command for command in commands if command[0] == "bbduk.sh")
+            self.assertIn("qtrim=r", bbduk_command)
+            self.assertNotIn("qtrim=t", bbduk_command)
             orientation = (results / "02_alignment" / "protocol_orientation.tsv").read_text(encoding="utf-8")
             self.assertIn("S1\tL001\t10\t90\t0.9\tpass", orientation)
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam").is_file())

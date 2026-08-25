@@ -5,6 +5,7 @@
 - Removed the incompatible Anaconda `defaults` channel and explicitly disabled implicit default channels.
 - Updated the samtools pin from 1.20 to 1.21 to satisfy the BBMap 39.13 runtime contract.
 - Added a Linux CI job that creates the complete Conda environment with strict Bioconda/conda-forge channel priority and verifies required Python, R and command-line tools.
+- Restricted BBDuk quality trimming to the right end of REV Read 1 so preprocessing cannot move its APA-defining 5-prime coordinate.
 
 The corrected specification was first dry-run solved with Mamba 2.8.0 on the target `biolserv` server: 386 packages and approximately 450 MB of downloads.
 

@@ -40,4 +40,7 @@ jobs:
           STAR --version
           samtools --version
           featureCounts -v
+          printf '@rev_smoke\nACGTCGATGCTAGCTACGATCGTA\n+\nIIIIIIIIIIIIIIIIIIIIIIII\n' > rev_smoke.fastq
+          bbduk.sh in=rev_smoke.fastq out=rev_smoke.trimmed.fastq ref=resources/quantseq_rev_adapters.fa int=f k=13 ktrim=r useshortkmers=t mink=5 qtrim=r trimq=10 minlength=20 threads=1
+          test -s rev_smoke.trimmed.fastq
           Rscript -e 'packages <- c("DESeq2", "DEXSeq", "DRIMSeq", "stageR", "ggplot2"); stopifnot(all(vapply(packages, requireNamespace, logical(1), quietly=TRUE))); print(sessionInfo())'

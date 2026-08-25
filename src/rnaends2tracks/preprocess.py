@@ -68,7 +68,7 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
         run(["fastqc", "--threads", str(threads), "--outdir", str(raw_lane_qc), lane["fastq_r1"]], lane_log, dry_run)
         run([
             "bbduk.sh", f"in={lane['fastq_r1']}", f"out={trimmed}", f"ref={adapters}",
-            "int=f", "k=13", "ktrim=r", "useshortkmers=t", "mink=5", "qtrim=t",
+            "int=f", "k=13", "ktrim=r", "useshortkmers=t", "mink=5", "qtrim=r",
             f"trimq={trimq}", f"minlength={minimum_length}", f"threads={threads}",
         ], lane_log, dry_run)
         run(["fastqc", "--threads", str(threads), "--outdir", str(trimmed_lane_qc), str(trimmed)], lane_log, dry_run)
