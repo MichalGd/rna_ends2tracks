@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Define the conservative GRCh38/v42 and GRCm39/vM31 PAS atlas v1 evidence policy.
+- Add deterministic normalization of GENCODE polyA GTF and PolyA_DB v4.1 Main/Max archives.
+- Require unique, strand-preserving mm10-to-GRCm39 conversion for mouse PolyA_DB sources.
+- Add a fixed-source download helper with explicit UCSC chain-license acceptance.
+
 ## 0.1.0-alpha.7 - 2026-08-26
 
 - Fix the shared installer immutability audit so normal Conda symbolic links do not cause a false failure.
