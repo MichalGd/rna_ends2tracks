@@ -3,7 +3,10 @@ from __future__ import annotations
 import csv
 import json
 import os
+import shutil
+import stat
 import subprocess
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -29,6 +32,19 @@ def _temporary_environment(project: dict[str, Any]) -> dict[str, str] | None:
     path = Path(configured).expanduser().resolve()
     path.mkdir(parents=True, exist_ok=True)
     return {"TMPDIR": str(path)}
+
+
+def _remove_owned_temporary_tree(path: Path) -> None:
+    """Remove a workflow-owned tree containing read-only copied package assets."""
+    if not path.is_dir():
+        return
+    for root, directories, _files in os.walk(path):
+        root_path = Path(root)
+        root_path.chmod(root_path.stat().st_mode | stat.S_IWUSR | stat.S_IXUSR)
+        for directory in directories:
+            child = root_path / directory
+            child.chmod(child.stat().st_mode | stat.S_IWUSR | stat.S_IXUSR)
+    shutil.rmtree(path)
 
 
 def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool = False) -> None:
@@ -267,8 +283,20 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
         merge_jobs.append((sample_id, merge_worker))
 
     run_bounded("preprocess_merges", merge_jobs, resource["merge_parallel_jobs"], timing_dir / "merges")
-    run(["multiqc", "--force", "--outdir", str(qc_dir / "multiqc"), str(qc_dir), str(module_dir)],
-        log_dir / "preprocess" / "multiqc.log", dry_run, env=tool_env)
+    # Frozen shared environments make MultiQC's copied template directories read-only.
+    # Disable MultiQC's own cleanup and remove only our dedicated temporary tree.
+    multiqc_temp_parent = results / ".checkpoints" / "multiqc_tmp"
+    multiqc_temp_parent.mkdir(parents=True, exist_ok=True)
+    if dry_run:
+        multiqc_temp = multiqc_temp_parent / "dry-run"
+    else:
+        multiqc_temp = Path(tempfile.mkdtemp(prefix="run.", dir=multiqc_temp_parent))
+    multiqc_env = {**(tool_env or {}), "TMPDIR": str(multiqc_temp)}
+    run(["multiqc", "--force", "--no-clean-up", "--outdir", str(qc_dir / "multiqc"),
+         str(qc_dir), str(module_dir)],
+        log_dir / "preprocess" / "multiqc.log", dry_run, env=multiqc_env)
+    if not dry_run:
+        _remove_owned_temporary_tree(multiqc_temp)
     if not dry_run:
         temporary_orientation = orientation_path.with_name(f".{orientation_path.name}.tmp")
         with temporary_orientation.open("w", encoding="utf-8", newline="") as handle:

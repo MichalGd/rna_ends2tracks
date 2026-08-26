@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.9 - 2026-08-27
+
+- Run MultiQC without its incompatible cleanup inside a workflow-owned temporary directory, then
+  remove that directory safely when package templates originate from an immutable shared environment.
+
 ## 0.1.0-alpha.8 - 2026-08-26
 
 - Define the conservative GRCh38/v42 and GRCm39/vM31 PAS atlas v1 evidence policy.

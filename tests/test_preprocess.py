@@ -4,10 +4,22 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rnaends2tracks.config import RunPlan
-from rnaends2tracks.preprocess import preprocess
+from rnaends2tracks.preprocess import _remove_owned_temporary_tree, preprocess
 
 
 class PreprocessOrderTests(unittest.TestCase):
+    def test_multiqc_read_only_temporary_tree_is_removed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            tree = Path(temporary) / "multiqc"
+            copied_template = tree / "template"
+            copied_template.mkdir(parents=True)
+            (copied_template / "footer.html").write_text("footer", encoding="utf-8")
+            copied_template.chmod(0o555)
+
+            _remove_owned_temporary_tree(tree)
+
+            self.assertFalse(tree.exists())
+
     def test_portable_dry_run_does_not_stat_missing_fastqs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -52,10 +64,10 @@ class PreprocessOrderTests(unittest.TestCase):
                 sample_rows=[{"sample_id": "S1", "genome": "GRCm39", "technical_replicate_id": "T01",
                               "lane_id": "L001", "fastq_r1": str(fastq)}],
                 contrasts=[], reference=reference, references={"GRCm39": reference})
-            calls, commands, phases = [], [], []
+            calls, commands, environments, phases = [], [], [], []
 
             def fake_run(command, _log, dry_run=False, cwd=None, env=None):
-                self.assertFalse(dry_run); calls.append(command[0]); commands.append(command)
+                self.assertFalse(dry_run); calls.append(command[0]); commands.append(command); environments.append(env)
                 if command[0] == "bbduk.sh":
                     Path(next(value[4:] for value in command if value.startswith("out="))).write_bytes(b"trimmed")
                 elif command[0] == "STAR":
@@ -86,6 +98,12 @@ class PreprocessOrderTests(unittest.TestCase):
             self.assertIn("S1\tT01\tL001\t10\t90\t0.9\tpass", orientation)
             star = next(command for command in commands if command[0] == "STAR")
             self.assertIn("ID:S1.T01.L001", star); self.assertIn("LB:S1.T01", star)
+            multiqc_index = calls.index("multiqc")
+            self.assertIn("--no-clean-up", commands[multiqc_index])
+            self.assertIn(str(results / ".checkpoints" / "multiqc_tmp"),
+                          environments[multiqc_index]["TMPDIR"])
+            self.assertFalse((results / ".checkpoints" / "multiqc_tmp").joinpath(
+                Path(environments[multiqc_index]["TMPDIR"]).name).exists())
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam").is_file())
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam.bai").is_file())
 
