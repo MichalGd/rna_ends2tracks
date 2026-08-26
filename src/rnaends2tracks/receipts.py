@@ -12,6 +12,8 @@ from typing import Any
 
 from . import __version__
 
+HASH_LIMIT_BYTES = 64 * 1024 * 1024
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -30,6 +32,18 @@ def write_receipt(module: str, output_dir: Path, signature: str, outputs: list[P
         location = shutil.which(executable)
         if location:
             software[executable] = {"path": location}
+    output_records = []
+    for path in outputs:
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        record: dict[str, Any] = {
+            "path": str(path.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+            "validation": "sha256" if stat.st_size <= HASH_LIMIT_BYTES else "size_mtime",
+        }
+        if stat.st_size <= HASH_LIMIT_BYTES:
+            record["sha256"] = sha256(path)
+        output_records.append(record)
     receipt = {
         "schema_version": 1,
         "module": module,
@@ -42,11 +56,9 @@ def write_receipt(module: str, output_dir: Path, signature: str, outputs: list[P
         "software": software,
         "command": command,
         "exit_status": 0,
-        "outputs": [
-            {"path": str(path.resolve()), "size": path.stat().st_size, "sha256": sha256(path)}
-            for path in outputs if path.is_file()
-        ],
+        "outputs": output_records,
     }
+    output_dir.mkdir(parents=True, exist_ok=True)
     receipt_path = output_dir / "run_receipt.json"
     temporary = output_dir / ".run_receipt.json.tmp"
     temporary.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -60,10 +72,22 @@ def receipt_valid(output_dir: Path, signature: str) -> bool:
         receipt: dict[str, Any] = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    if receipt.get("signature") != signature or receipt.get("exit_status") != 0:
+    if (
+        receipt.get("workflow_version") != __version__
+        or receipt.get("signature") != signature
+        or receipt.get("exit_status") != 0
+    ):
         return False
     for output in receipt.get("outputs", []):
         path = Path(output["path"])
-        if not path.is_file() or path.stat().st_size != output["size"] or sha256(path) != output["sha256"]:
+        if not path.is_file():
+            return False
+        stat = path.stat()
+        if stat.st_size != output["size"]:
+            return False
+        if output.get("validation") == "size_mtime":
+            if stat.st_mtime_ns != output.get("mtime_ns"):
+                return False
+        elif sha256(path) != output.get("sha256"):
             return False
     return True

@@ -1,5 +1,7 @@
 # Alpha.3 deployment-readiness review
 
+> Historical alpha.3 validation record; it is not the alpha.6 run or installation guide.
+
 **Audience:** workflow owner and `biolserv` administrator  
 **Review date:** 2026-08-25  
 **Scope:** no-UMI Lexogen QuantSeq REV single-end processing, human GRCh38 and mouse GRCm39, the shared Conda installation, and reuse of the audited STAR/reference assets.

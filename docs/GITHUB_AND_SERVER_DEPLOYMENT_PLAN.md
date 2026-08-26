@@ -1,5 +1,7 @@
 # GitHub publication and shared-server deployment plan
 
+> Historical alpha.1 planning record. The current alpha.6 procedure is [server_installation.md](server_installation.md).
+
 ## 1. Deployment decision
 
 Publish the current implementation as a pre-release, initially `v0.1.0-alpha.1`, rather than a production release. The Python contracts have passed compilation and smoke testing, but the R modules, Linux bioinformatics tools, synthetic truth set, human/mouse reference integration and PolyAseqTrap REV pilot still require server validation.

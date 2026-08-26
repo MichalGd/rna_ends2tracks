@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import sys
 import types
-from io import StringIO
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -21,15 +21,21 @@ pysam_stub = types.ModuleType("pysam")
 pysam_stub.AlignedSegment = object
 sys.modules.setdefault("pysam", pysam_stub)
 
-from rnaends2tracks.apa_a import reverse_complement, transcript_end
-from rnaends2tracks.config import ConfigError, generate_contrasts, resolve_contrast_designs, validate_design
+from rnaends2tracks.apa_a import reverse_complement
+from rnaends2tracks.config import (
+    ConfigError,
+    generate_contrasts,
+    resolve_contrast_designs,
+    validate_design,
+)
+from rnaends2tracks.mcell2019 import transcript_end
 
 
 class Read:
     is_reverse = True
     reference_start = 100
     reference_end = 150
-    cigartuples = [(0, 50)]
+    cigartuples: ClassVar[list[tuple[int, int]]] = [(0, 50)]
 
 
 def sample(identifier: str, condition: str, batch: str) -> dict[str, str]:

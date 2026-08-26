@@ -1,79 +1,144 @@
 args <- commandArgs(trailingOnly=TRUE)
 get_arg <- function(name, default=NULL) {
-  pos <- match(name, args); if (is.na(pos)) return(default)
-  if (pos == length(args)) stop(paste("Missing value for", name)); args[[pos + 1]]
+  pos <- match(name, args)
+  if (is.na(pos)) return(default)
+  if (pos == length(args)) stop(paste("Missing value for", name))
+  args[[pos + 1]]
 }
 suppressPackageStartupMessages(library(DEXSeq))
+
 counts_df <- read.delim(get_arg("--counts"), check.names=FALSE, stringsAsFactors=FALSE)
 catalog <- read.delim(get_arg("--catalog"), check.names=FALSE, stringsAsFactors=FALSE)
-samples <- read.delim(get_arg("--samples"), check.names=FALSE, stringsAsFactors=FALSE)
+samples_all <- read.delim(get_arg("--samples"), check.names=FALSE, stringsAsFactors=FALSE)
 contrasts <- read.delim(get_arg("--contrasts"), check.names=FALSE, stringsAsFactors=FALSE)
-outdir <- get_arg("--outdir"); min_count <- as.integer(get_arg("--min-count", "5"))
+outdir <- get_arg("--outdir")
+min_count <- as.integer(get_arg("--min-count", "5"))
+fdr <- as.numeric(get_arg("--fdr", "0.05"))
 default_design_text <- get_arg("--design", "~ condition")
+contrast_id <- get_arg("--contrast-id", "")
+index_file <- get_arg("--index-file", file.path(outdir, "result_index.tsv"))
 dir.create(outdir, recursive=TRUE, showWarnings=FALSE)
-meta <- merge(catalog[, c("pas_id", "gene_id")], counts_df[, "pas_id", drop=FALSE], by="pas_id", sort=FALSE)
+
+required_catalog <- c("pas_id", "gene_id", "strand", "summit_start", "assignment_status")
+if (!all(required_catalog %in% colnames(catalog))) stop("Active-PAS catalog contract is incomplete")
 rownames(counts_df) <- counts_df$pas_id
-count_matrix <- as.matrix(counts_df[, setdiff(colnames(counts_df), "pas_id"), drop=FALSE]); storage.mode(count_matrix) <- "integer"
+sample_columns <- intersect(samples_all$sample_id, setdiff(colnames(counts_df), "pas_id"))
+count_matrix <- as.matrix(counts_df[, sample_columns, drop=FALSE])
+storage.mode(count_matrix) <- "integer"
+if (nzchar(contrast_id)) {
+  contrasts <- contrasts[contrasts$contrast_id == contrast_id, , drop=FALSE]
+  if (nrow(contrasts) != 1) stop(paste("Expected exactly one contrast:", contrast_id))
+}
+
+ratio_text <- function(numerator, denominator) {
+  if (numerator == 0 && denominator == 0) return("NA")
+  if (denominator == 0) return("Inf")
+  format(numerator / denominator, digits=12)
+}
+direction_from_cross_product <- function(dt, pt, dc, pc) {
+  if ((dt == 0 && pt == 0) || (dc == 0 && pc == 0)) return("not_classifiable")
+  left <- dt * pc; right <- pt * dc
+  if (left > right) "distal" else if (left < right) "proximal" else "no_directional_change"
+}
+
 index <- list()
 for (i in seq_len(nrow(contrasts))) {
-  con <- contrasts[i, ]; keep_samples <- samples$sample_id[samples$condition %in% c(con$denominator, con$numerator)]
-  sample_data <- samples[match(keep_samples, samples$sample_id), , drop=FALSE]
+  con <- contrasts[i, ]
+  keep <- samples_all$sample_id %in% sample_columns & samples_all$condition %in% c(con$denominator, con$numerator)
+  sample_data <- samples_all[keep, , drop=FALSE]
   rownames(sample_data) <- sample_data$sample_id
   sample_data$condition <- relevel(factor(sample_data$condition), ref=con$denominator)
-  design_text <- default_design_text
-  if ("resolved_design" %in% colnames(contrasts) && !is.na(con$resolved_design) && nzchar(con$resolved_design)) {
-    design_text <- con$resolved_design
-  }
-  design_variables <- all.vars(as.formula(design_text))
-  covariates <- setdiff(design_variables, "condition")
-  missing <- setdiff(design_variables, colnames(sample_data))
-  if (length(missing)) stop(paste("Design columns missing for", con$contrast_id, ":", paste(missing, collapse=", ")))
-  for (variable in design_variables) {
-    if (any(is.na(sample_data[[variable]]) | sample_data[[variable]] == "")) {
-      stop(paste("Missing design value for", con$contrast_id, ":", variable))
-    }
-    if (variable != "condition") sample_data[[variable]] <- factor(sample_data[[variable]])
-  }
-  pair_design <- model.matrix(as.formula(design_text), data=sample_data)
-  if (qr(pair_design)$rank < ncol(pair_design)) stop(paste("Pair-specific design is not full rank:", con$contrast_id))
-  covariate_terms <- if (length(covariates)) paste0(covariates, ":exon") else character(0)
-  full_formula <- as.formula(paste("~ sample + exon", paste(c(covariate_terms, "condition:exon"), collapse=" + "), sep=" + "))
-  reduced_formula <- as.formula(paste("~ sample + exon", paste(covariate_terms, collapse=" + "), sep=if (length(covariate_terms)) " + " else ""))
-  keep_sites <- catalog$confidence %in% c("high_confidence", "rescued_a_rich") & catalog$gene_id != ""
-  gene_sites <- table(catalog$gene_id[keep_sites]); eligible_genes <- names(gene_sites[gene_sites >= 2])
-  keep_sites <- keep_sites & catalog$gene_id %in% eligible_genes & rowSums(count_matrix[, keep_samples, drop=FALSE]) >= min_count
-  gene_sites <- table(catalog$gene_id[keep_sites]); eligible_genes <- names(gene_sites[gene_sites >= 2])
-  keep_sites <- keep_sites & catalog$gene_id %in% eligible_genes
-  selected <- catalog$pas_id[keep_sites]
+  design_text <- if ("resolved_design" %in% colnames(contrasts) && nzchar(con$resolved_design)) con$resolved_design else default_design_text
+  variables <- all.vars(as.formula(design_text))
+  missing <- setdiff(variables, colnames(sample_data))
+  if (length(missing)) stop(paste("Design columns missing for", con$contrast_id, paste(missing, collapse=", ")))
+  for (variable in variables) sample_data[[variable]] <- factor(sample_data[[variable]])
+  design_matrix <- model.matrix(as.formula(design_text), data=sample_data)
+  if (qr(design_matrix)$rank < ncol(design_matrix)) stop(paste("Pair-specific design is not full rank:", con$contrast_id))
+  covariates <- setdiff(variables, "condition")
+  interaction_terms <- c(paste0(covariates, ":exon"), "condition:exon")
+  full_formula <- as.formula(paste("~ sample + exon +", paste(interaction_terms, collapse=" + ")))
+  reduced_formula <- if (length(covariates)) {
+    as.formula(paste("~ sample + exon +", paste0(covariates, ":exon", collapse=" + ")))
+  } else as.formula("~ sample + exon")
+
+  eligible <- catalog$assignment_status == "unique" & nzchar(catalog$gene_id)
+  first_count <- table(catalog$gene_id[eligible])
+  eligible <- eligible & catalog$gene_id %in% names(first_count[first_count >= 2])
+  eligible <- eligible & rowSums(count_matrix[catalog$pas_id, rownames(sample_data), drop=FALSE]) >= min_count
+  second_count <- table(catalog$gene_id[eligible])
+  eligible <- eligible & catalog$gene_id %in% names(second_count[second_count >= 2])
+  selected <- catalog$pas_id[eligible]
   if (length(selected) < 2) stop(paste("No testable APA-A sites for", con$contrast_id))
-  mat <- count_matrix[selected, keep_samples, drop=FALSE]
-  dxd <- DEXSeqDataSet(mat, sampleData=sample_data, design=full_formula,
-                       featureID=selected, groupID=catalog$gene_id[match(selected, catalog$pas_id)])
-  dxd <- estimateSizeFactors(dxd); dxd <- estimateDispersions(dxd)
+  mat <- count_matrix[selected, rownames(sample_data), drop=FALSE]
+  group_ids <- catalog$gene_id[match(selected, catalog$pas_id)]
+  dxd <- DEXSeqDataSet(mat, sampleData=sample_data, design=full_formula, featureID=selected, groupID=group_ids)
+  dxd <- estimateSizeFactors(dxd)
+  dxd <- estimateDispersions(dxd)
   dxd <- testForDEU(dxd, reducedModel=reduced_formula)
   dxd <- estimateExonFoldChanges(dxd, fitExpToVar="condition")
-  result <- as.data.frame(DEXSeqResults(dxd)); result$pas_id <- result$featureID
+  result <- as.data.frame(DEXSeqResults(dxd))
+  result$pas_id <- result$featureID
   norm <- counts(dxd, normalized=TRUE)
   den <- rowMeans(norm[, sample_data$condition == con$denominator, drop=FALSE])
   num <- rowMeans(norm[, sample_data$condition == con$numerator, drop=FALSE])
-  groups <- catalog$gene_id[match(rownames(norm), catalog$pas_id)]
-  den_total <- ave(den, groups, FUN=sum); num_total <- ave(num, groups, FUN=sum)
-  result$PAU_denominator <- den / pmax(den_total, 1e-12)
-  result$PAU_numerator <- num / pmax(num_total, 1e-12)
+  all_mean <- rowMeans(norm)
+  genes <- catalog$gene_id[match(rownames(norm), catalog$pas_id)]
+  den_total <- ave(den, genes, FUN=sum); num_total <- ave(num, genes, FUN=sum)
+  result$mean_normalized_count <- all_mean[match(result$pas_id, rownames(norm))]
+  result$PAU_denominator <- ifelse(den_total > 0, den / den_total, 0)
+  result$PAU_numerator <- ifelse(num_total > 0, num / num_total, 0)
   result$delta_PAU <- result$PAU_numerator - result$PAU_denominator
-  positions <- catalog$start[match(result$pas_id, catalog$pas_id)]
-  result$weighted_genomic_position_shift_nt <- ave(result$PAU_numerator * positions, groups, FUN=sum) - ave(result$PAU_denominator * positions, groups, FUN=sum)
-  result <- result[, c("pas_id", setdiff(colnames(result), "pas_id"))]
+  result$gene_id <- catalog$gene_id[match(result$pas_id, catalog$pas_id)]
+  result$summit_start <- catalog$summit_start[match(result$pas_id, catalog$pas_id)]
+  result$strand <- catalog$strand[match(result$pas_id, catalog$pas_id)]
+  result <- result[, c("pas_id", "gene_id", "summit_start", "strand", setdiff(colnames(result), c("pas_id", "gene_id", "summit_start", "strand")))]
   target <- file.path(outdir, paste0(con$contrast_id, ".dexseq.tsv"))
   write.table(result, target, sep="\t", quote=FALSE, row.names=FALSE)
-  index[[length(index)+1]] <- data.frame(
-    contrast_id=con$contrast_id, result_file=target, tested_sites=nrow(result),
-    significant_sites=sum(!is.na(result$padj) & result$padj < 0.05),
-    design_mode=if ("design_mode" %in% colnames(contrasts)) con$design_mode else "legacy",
-    resolved_design=design_text,
-    paired=if ("paired" %in% colnames(contrasts)) con$paired else FALSE,
-    n_pairs=if ("n_pairs" %in% colnames(contrasts)) con$n_pairs else 0,
-    warning=con$design_status, check.names=FALSE
+
+  shift_rows <- list()
+  for (gene in unique(result$gene_id)) {
+    rows <- result[result$gene_id == gene, , drop=FALSE]
+    significant <- rows[!is.na(rows$padj) & rows$padj < fdr, , drop=FALSE]
+    if (!nrow(significant)) {
+      shift_rows[[length(shift_rows) + 1]] <- data.frame(gene_id=gene, shift="no_shift", proximal_pas="", distal_pas="",
+        ratio_numerator="NA", ratio_denominator="NA", comparator_rule="no_significant_pas", stringsAsFactors=FALSE)
+      next
+    }
+    ordered <- significant[order(significant$padj, -abs(significant$delta_PAU), -significant$mean_normalized_count, significant$summit_start), , drop=FALSE]
+    if (nrow(ordered) >= 2) {
+      chosen <- ordered[1:2, , drop=FALSE]; comparator_rule <- "two_significant_lowest_padj"
+    } else {
+      other <- rows[rows$pas_id != ordered$pas_id[1] & rows$mean_normalized_count > 0, , drop=FALSE]
+      if (!nrow(other)) {
+        shift_rows[[length(shift_rows) + 1]] <- data.frame(gene_id=gene, shift="not_classifiable", proximal_pas="", distal_pas="",
+          ratio_numerator="NA", ratio_denominator="NA", comparator_rule="no_nonzero_comparator", stringsAsFactors=FALSE)
+        next
+      }
+      pooled_raw <- rowSums(mat[other$pas_id, , drop=FALSE])
+      other <- other[order(-other$mean_normalized_count, -pooled_raw, other$summit_start), , drop=FALSE]
+      chosen <- rbind(ordered[1, , drop=FALSE], other[1, , drop=FALSE])
+      comparator_rule <- "one_significant_vs_highest_mean_normalized_other"
+    }
+    if (chosen$strand[1] == "+") chosen <- chosen[order(chosen$summit_start), , drop=FALSE]
+    else chosen <- chosen[order(-chosen$summit_start), , drop=FALSE]
+    proximal <- chosen[1, ]; distal <- chosen[2, ]
+    shift_rows[[length(shift_rows) + 1]] <- data.frame(
+      gene_id=gene,
+      shift=direction_from_cross_product(distal$PAU_numerator, proximal$PAU_numerator, distal$PAU_denominator, proximal$PAU_denominator),
+      proximal_pas=proximal$pas_id, distal_pas=distal$pas_id,
+      ratio_numerator=ratio_text(distal$PAU_numerator, proximal$PAU_numerator),
+      ratio_denominator=ratio_text(distal$PAU_denominator, proximal$PAU_denominator),
+      comparator_rule=comparator_rule, stringsAsFactors=FALSE
+    )
+  }
+  shift_target <- file.path(outdir, paste0(con$contrast_id, ".apa_shift.tsv"))
+  write.table(do.call(rbind, shift_rows), shift_target, sep="\t", quote=FALSE, row.names=FALSE)
+  index[[length(index) + 1]] <- data.frame(
+    contrast_id=con$contrast_id, result_file=target, shift_file=shift_target, tested_sites=nrow(result),
+    significant_sites=sum(!is.na(result$padj) & result$padj < fdr), design_mode=con$design_mode,
+    resolved_design=design_text, paired=con$paired, n_pairs=con$n_pairs, warning=con$design_status,
+    check.names=FALSE
   )
 }
-write.table(do.call(rbind, index), file.path(outdir, "result_index.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(do.call(rbind, index), index_file, sep="\t", quote=FALSE, row.names=FALSE)

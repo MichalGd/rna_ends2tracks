@@ -4,11 +4,11 @@ import csv
 import shlex
 from pathlib import Path
 
-from .apa_a import load_genes
 from .config import RunPlan, signature_for
 from .external import event, require_tools, run
+from .mcell2019 import load_gene_models
 from .receipts import receipt_valid, write_receipt
-
+from .statistics import run_r_contrasts
 
 REQUIRED_CATALOG = {"pas_id", "gene_id", "chrom", "start", "end", "strand", "feature_class"}
 
@@ -46,8 +46,8 @@ def _validate_polyaseqtrap_outputs(catalog: Path, counts: Path, deepip: Path, sa
 
 def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False, force: bool = False) -> None:
     settings = plan.project.get("apa_b", {})
-    module_dir = results / "05_apa_b_polyaseqtrap_drimseq"
-    log_dir = results / "provenance" / "logs"
+    module_dir = results / "07_apa_b"
+    log_dir = results / "logs"
     module_dir.mkdir(parents=True, exist_ok=True)
     if settings.get("enabled", False) is False:
         event(log_dir, "apa_b", "disabled", "APA-B disabled in project configuration")
@@ -61,61 +61,88 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
     if not template:
         raise RuntimeError("apa_b.command_template is required for the pinned local PolyAseqTrap installation")
     bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples]
-    if not dry_run and any(not path.is_file() for path in bams):
-        raise RuntimeError("APA-B requires all shared BAMs")
-    signature = signature_for([*bams, plan.reference["fasta"], plan.reference["gtf"]], {
-        "module": "apa_b", "settings": settings, "design": plan.project["design"],
-        "samples": plan.samples, "contrasts": plan.contrasts, "reporting": plan.project.get("reporting", {}),
+    ref_inputs = [Path(plan.reference_for(genome)[key]) for genome in plan.references for key in ("fasta", "gtf")]
+    signature = signature_for([*bams, *ref_inputs], {
+        "module": "apa_b", "settings": settings, "samples": plan.samples,
+        "contrasts": plan.contrasts, "reporting": plan.project.get("reporting", {}),
     }) if not dry_run else "dry-run"
-    catalog = module_dir / "pas_catalog.tsv"
-    counts = module_dir / "pas_counts.tsv"
-    deepip = module_dir / "deepip_audit.tsv"
-    stats_index = module_dir / "drimseq" / "result_index.tsv"
-    pcpa_catalog = module_dir / "pcpa_candidate_catalog.tsv"
-    pcpa_result = module_dir / "candidate_pcpa.tsv"
     if not force and not dry_run and receipt_valid(module_dir, signature):
         event(log_dir, "apa_b", "skipped", "Valid matching receipt")
         return
-    manifest = module_dir / "bam_manifest.tsv"
-    with manifest.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-        writer.writerow(["sample_id", "bam"])
-        writer.writerows((sample["sample_id"], bam) for sample, bam in zip(plan.samples, bams))
-    replacements = {
-        "bam_manifest": str(manifest), "fasta": plan.reference["fasta"], "gtf": plan.reference["gtf"],
-        "outdir": str(module_dir), "species": plan.reference["species"], "assembly": plan.reference["assembly"],
-    }
-    try:
-        command = shlex.split(template.format(**replacements))
-    except KeyError as exc:
-        raise RuntimeError(f"Unknown placeholder in apa_b.command_template: {exc}") from exc
-    run(command, log_dir / "apa_b" / "polyaseqtrap.log", dry_run)
+    outputs: list[Path] = []
+    if not dry_run:
+        require_tools(["Rscript"])
+    for genome in plan.references:
+        samples = [sample for sample in plan.samples if sample["genome"] == genome]
+        contrasts = [contrast for contrast in plan.contrasts if contrast["genome"] == genome]
+        if not samples or not contrasts:
+            continue
+        reference = plan.reference_for(genome)
+        genome_dir = module_dir / genome
+        genome_dir.mkdir(parents=True, exist_ok=True)
+        manifest = genome_dir / "bam_manifest.tsv"
+        genome_bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in samples]
+        with manifest.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+            writer.writerow(["sample_id", "bam"])
+            writer.writerows((sample["sample_id"], bam) for sample, bam in zip(samples, genome_bams))
+        replacements = {"bam_manifest": str(manifest), "fasta": reference["fasta"],
+                        "gtf": reference["gtf"], "outdir": str(genome_dir),
+                        "species": reference["species"], "assembly": reference["assembly"]}
+        try:
+            command = shlex.split(template.format(**replacements))
+        except KeyError as exc:
+            raise RuntimeError(f"Unknown placeholder in APA_B_COMMAND_TEMPLATE: {exc}") from exc
+        run(command, log_dir / "apa_b" / genome / "engine.log", dry_run)
+        if dry_run:
+            continue
+        catalog = genome_dir / "pas_catalog.tsv"
+        counts = genome_dir / "pas_counts.tsv"
+        deepip = genome_dir / "deepip_audit.tsv"
+        _validate_polyaseqtrap_outputs(catalog, counts, deepip, [sample["sample_id"] for sample in samples])
+        stats_dir = genome_dir / "drimseq"
+        index = stats_dir / "result_index.tsv"
+        genome_plan = RunPlan(plan.project, samples,
+            [row for row in plan.sample_rows if row["genome"] == genome], contrasts, reference, {genome: reference})
+        run_r_contrasts(
+            module=f"apa_b_{genome}", plan=genome_plan, results=results,
+            script=script_root / "R" / "drimseq_stager_all_pairs.R",
+            common_arguments=["--counts", str(counts), "--catalog", str(catalog),
+                "--samples", str(results / "00_metadata" / "validated_samples.tsv"),
+                "--contrasts", str(results / "00_metadata" / "contrasts.tsv"),
+                "--outdir", str(stats_dir), "--design", str(plan.project["design"]),
+                "--fdr", str(plan.project["reporting"]["fdr"])],
+            outdir=stats_dir, log_dir=log_dir / "apa_b" / genome / "contrasts",
+            receipt_root=stats_dir / ".receipts", index_path=index,
+            parallel_jobs=plan.project["resources"]["apa_b"]["contrast_parallel_jobs"],
+            threads=1, memory_gb=plan.project["resources"]["apa_b"]["contrast_memory_gb"],
+            output_suffixes=[".drimseq_stager.tsv", ".gene_screen.tsv"],
+            signature_inputs=[counts, catalog], signature_parameters={
+                "genome": genome, "design": plan.project["design"],
+                "reporting": plan.project["reporting"], "settings": settings,
+            },
+            dry_run=False, force=force,
+        )
+        pcpa_catalog = genome_dir / "pcpa_candidate_catalog.tsv"
+        pcpa_result = genome_dir / "candidate_pcpa.tsv"
+        _classify_pcpa(catalog, reference["gtf"], pcpa_catalog)
+        _filter_pcpa(pcpa_catalog, catalog, index, pcpa_result,
+                     float(plan.project["reporting"]["fdr"]),
+                     float(plan.project["reporting"]["min_abs_delta_pau"]))
+        outputs.extend([manifest, catalog, counts, deepip, index, pcpa_catalog, pcpa_result])
+        with index.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle, delimiter="\t"):
+                outputs.extend([Path(row["result_file"]),
+                                stats_dir / f"{row['contrast_id']}.gene_screen.tsv"])
     if dry_run:
-        event(log_dir, "apa_b", "dry_run", "Would run independent PolyAseqTrap adapter and DRIMSeq/stageR")
+        event(log_dir, "apa_b", "dry_run", "Would run independent genome-specific APA-B and DRIMSeq/stageR")
         return
-    _validate_polyaseqtrap_outputs(catalog, counts, deepip, [sample["sample_id"] for sample in plan.samples])
-    require_tools(["Rscript"])
-    run([
-        "Rscript", str(script_root / "R" / "drimseq_stager_all_pairs.R"),
-        "--counts", str(counts), "--catalog", str(catalog),
-        "--samples", str(results / "00_metadata" / "validated_samples.tsv"),
-        "--contrasts", str(results / "00_metadata" / "contrasts.tsv"),
-        "--outdir", str(module_dir / "drimseq"),
-        "--design", str(plan.project["design"]),
-        "--fdr", str(plan.project.get("reporting", {}).get("fdr", 0.05)),
-    ], log_dir / "apa_b" / "drimseq_stager.log", False)
-    _classify_pcpa(catalog, plan.reference["gtf"], pcpa_catalog)
-    _filter_pcpa(
-        pcpa_catalog, catalog, stats_index, pcpa_result,
-        float(plan.project.get("reporting", {}).get("fdr", 0.05)),
-        float(plan.project.get("reporting", {}).get("min_abs_delta_pau", 0.10)),
-    )
-    write_receipt("apa_b", module_dir, signature, [catalog, counts, deepip, stats_index, pcpa_catalog, pcpa_result], ["rna-ends2tracks", "apa-b"])
-    event(log_dir, "apa_b", "completed", "Independent PolyAseqTrap + DRIMSeq/stageR branch")
+    write_receipt("apa_b", module_dir, signature, outputs, ["rna-ends2tracks", "apa-b"])
+    event(log_dir, "apa_b", "completed", "Independent genome-specific APA-B + DRIMSeq/stageR branch")
 
 
 def _classify_pcpa(catalog_path: Path, gtf: str, output: Path) -> None:
-    genes, _ = load_genes(gtf)
+    genes = load_gene_models(gtf)
     with catalog_path.open(encoding="utf-8-sig", newline="") as handle:
         catalog = list(csv.DictReader(handle, delimiter="\t"))
     terminal_genes = {row["gene_id"] for row in catalog if row["gene_id"] and row["feature_class"].startswith("terminal")}

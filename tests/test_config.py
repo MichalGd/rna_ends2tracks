@@ -7,8 +7,8 @@ from pathlib import Path
 import yaml
 
 from rnaends2tracks.config import (
-    ConfigError,
     REQUIRED_COLUMNS,
+    ConfigError,
     build_plan,
     collapse_samples,
     generate_contrasts,
@@ -143,6 +143,22 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(collapsed[0]["sequencing_lane_count"], "3")
             self.assertEqual(collapsed[0]["description"], "Description for S1")
             self.assertNotIn("technical_replicate_id", collapsed[0])
+
+    def test_optional_biological_metadata_must_match_across_lanes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fields = [*REQUIRED_COLUMNS, "donor"]
+            with (root / "samples.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
+                for lane, donor in (("L001", "D1"), ("L002", "D2")):
+                    row = sample("S1", "A", "B1")
+                    row.update({
+                        "lane_id": lane, "fastq_r1": f"S1_{lane}.fastq.gz",
+                        "fastq_r2": "", "donor": donor,
+                    })
+                    writer.writerow(row)
+            with self.assertRaisesRegex(ConfigError, "Biological metadata differs among lanes"):
+                load_samplesheet(root / "samples.csv", check_fastqs=False)
 
     def test_mouse_project_and_no_umi_contract(self):
         with tempfile.TemporaryDirectory() as temporary:

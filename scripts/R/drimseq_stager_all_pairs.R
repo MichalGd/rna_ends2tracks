@@ -10,12 +10,18 @@ samples_all <- read.delim(get_arg("--samples"), check.names=FALSE, stringsAsFact
 contrasts <- read.delim(get_arg("--contrasts"), check.names=FALSE, stringsAsFactors=FALSE)
 outdir <- get_arg("--outdir"); alpha <- as.numeric(get_arg("--fdr", "0.05"))
 default_design_text <- get_arg("--design", "~ condition")
+contrast_id <- get_arg("--contrast-id", "")
+index_file <- get_arg("--index-file", file.path(outdir, "result_index.tsv"))
 dir.create(outdir, recursive=TRUE, showWarnings=FALSE)
 rownames(counts_wide) <- counts_wide$pas_id
 sample_columns <- intersect(samples_all$sample_id, colnames(counts_wide))
 matrix_all <- as.matrix(counts_wide[, sample_columns, drop=FALSE]); storage.mode(matrix_all) <- "integer"
 gene_ids <- catalog$gene_id[match(rownames(matrix_all), catalog$pas_id)]
 index <- list()
+if (nzchar(contrast_id)) {
+  contrasts <- contrasts[contrasts$contrast_id == contrast_id, , drop=FALSE]
+  if (nrow(contrasts) != 1) stop(paste("Expected exactly one contrast:", contrast_id))
+}
 for (i in seq_len(nrow(contrasts))) {
   con <- contrasts[i, ]; keep <- samples_all$condition %in% c(con$denominator, con$numerator)
   design_text <- default_design_text
@@ -80,4 +86,4 @@ for (i in seq_len(nrow(contrasts))) {
     warning=con$design_status, check.names=FALSE
   )
 }
-write.table(do.call(rbind, index), file.path(outdir, "result_index.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(do.call(rbind, index), index_file, sep="\t", quote=FALSE, row.names=FALSE)
