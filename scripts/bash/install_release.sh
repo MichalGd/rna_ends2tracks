@@ -72,7 +72,7 @@ nice -n 10 "$MAMBA" --no-rc env create --prefix "$ENV_PREFIX" --file environment
 ln -s "$ENV_PREFIX/bin/rna-ends2tracks" "$VERSIONED_LAUNCHER"
 chmod -R a+rX "$ENV_PREFIX" "$INSTALL_AUDIT"
 chmod -R a-w "$ENV_PREFIX"
-if find "$ENV_PREFIX" -perm /222 -print -quit | grep -q .; then
+if find "$ENV_PREFIX" ! -type l -perm /222 -print -quit | grep -q .; then
   echo "Writable content remains in versioned environment" >&2
   exit 2
 fi

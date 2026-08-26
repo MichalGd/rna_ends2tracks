@@ -6,7 +6,7 @@ Install releases side-by-side into a writable shared environment parent. Do not 
 git clone https://github.com/MichalGd/rna_ends2tracks.git
 cd rna_ends2tracks
 bash scripts/bash/install_release.sh \
-  --tag v0.1.0-alpha.6 \
+  --tag v0.1.0-alpha.7 \
   --env-parent /opt/conda_envs \
   --bin-dir /opt/conda_envs/bin \
   --mamba /opt/miniconda/condabin/mamba
