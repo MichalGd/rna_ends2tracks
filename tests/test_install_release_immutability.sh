@@ -4,6 +4,8 @@ set -euo pipefail
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="$PROJECT_ROOT/scripts/bash/install_release.sh"
 
+# This asserts literal installer source; $ENV_PREFIX must not expand in this test.
+# shellcheck disable=SC2016
 grep -Fq 'find "$ENV_PREFIX" ! -type l -perm /222 -print -quit' "$INSTALLER"
 
 case "$(uname -s)" in
