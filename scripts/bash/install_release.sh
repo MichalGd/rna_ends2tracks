@@ -69,7 +69,9 @@ nice -n 10 "$MAMBA" --no-rc env create --prefix "$ENV_PREFIX" --file environment
 "$MAMBA" list -p "$ENV_PREFIX" --explicit > "$INSTALL_AUDIT/environment-linux-64.explicit.txt"
 "$MAMBA" run -p "$ENV_PREFIX" python -m pip freeze > "$INSTALL_AUDIT/pip-freeze.txt"
 
-ln -s "$ENV_PREFIX/bin/rna-ends2tracks" "$VERSIONED_LAUNCHER"
+bash scripts/bash/write_versioned_launcher.sh \
+  --environment "$ENV_PREFIX" \
+  --output "$VERSIONED_LAUNCHER"
 chmod -R a+rX "$ENV_PREFIX" "$INSTALL_AUDIT"
 chmod -R a-w "$ENV_PREFIX"
 if find "$ENV_PREFIX" ! -type l -perm /222 -print -quit | grep -q .; then

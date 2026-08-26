@@ -6,13 +6,13 @@ Install releases side-by-side into a writable shared environment parent. Do not 
 git clone https://github.com/MichalGd/rna_ends2tracks.git
 cd rna_ends2tracks
 bash scripts/bash/install_release.sh \
-  --tag v0.1.0-alpha.7 \
+  --tag v0.1.0-alpha.8 \
   --env-parent /opt/conda_envs \
   --bin-dir /opt/conda_envs/bin \
   --mamba /opt/miniconda/condabin/mamba
 ```
 
-The installer checks out the exact tag, creates a new environment, installs the package, runs Python tests, parses all R modules, executes the C4 paired/unpaired DESeq2 and track-factor smoke test, exports explicit/pip inventories, freezes the versioned environment, creates a versioned launcher and atomically promotes the stable symlink. Existing versioned launchers remain rollback targets.
+The installer checks out the exact tag, creates a new environment, installs the package, runs Python tests, parses all R modules, executes the C4 paired/unpaired DESeq2 and track-factor smoke test, exports explicit/pip inventories, freezes the versioned environment, creates a self-contained versioned launcher and atomically promotes the stable symlink. The launcher prepends its immutable environment to `PATH` and clears inherited Python/R library overrides, so users do not need to activate Conda. Existing versioned launchers remain rollback targets.
 
 Installation can run while another workflow is active because it creates different paths. Keep Mamba solving/installation at a low nice priority and choose conservative global run resources. Promotion affects only future invocations: an already running process continues with its loaded interpreter and absolute executable paths.
 

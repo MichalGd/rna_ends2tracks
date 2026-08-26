@@ -8,3 +8,4 @@ for script in "${PROJECT_ROOT}"/bin/*.sh "${PROJECT_ROOT}"/scripts/bash/*.sh "${
   bash -n "$script"
 done
 bash "${SCRIPT_DIR}/test_install_release_immutability.sh"
+bash "${SCRIPT_DIR}/test_versioned_launcher.sh"
