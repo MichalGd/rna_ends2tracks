@@ -8,6 +8,8 @@ INSTALLER="$PROJECT_ROOT/scripts/bash/install_release.sh"
 # shellcheck disable=SC2016
 grep -Fq 'find "$ENV_PREFIX" ! -type l -perm /222 -print -quit' "$INSTALLER"
 grep -Fq 'bash scripts/bash/write_versioned_launcher.sh' "$INSTALLER"
+# This also asserts literal installer source; $ENV_PREFIX must not expand here.
+# shellcheck disable=SC2016
 if grep -Fq 'ln -s "$ENV_PREFIX/bin/rna-ends2tracks"' "$INSTALLER"; then
   echo "Installer still creates a non-self-contained launcher symlink" >&2
   exit 1
