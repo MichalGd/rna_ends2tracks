@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.6 - 2026-08-26
+
+- Replaced the normal YAML interface with one restricted, commented `config.conf` plus one combined lane-level samplesheet.
+- Added independent bounded pools for QC/trimming, STAR, merging, end extraction, tracks and pairwise statistical jobs, with global CPU/RAM preflight ceilings and timing records.
+- Added simultaneous GRCh38/GRCm39 metadata support while strictly separating reference use, PAS discovery and contrasts by genome.
+- Implemented C0-C5 count universes, end-defining clip auditing, refined internal-priming masking/rescue, and condition-blind two-round Mcell2019 PAS discovery.
+- Made C4 active-PAS gene sums primary DGE and retained C5 featureCounts as an explicit diagnostic with correlation/discrepancy tables.
+- Implemented deterministic DEXSeq comparator/shift rules, candidate intragenic PCPA reporting and pilot-gated independent APA-B comparison.
+- Added the five default strand-specific track families, CPM for every family, and DESeq2/robust-CPM scaling for C2/C3.
+- Added run locking, per-unit receipts, atomic outputs, success-only allow-list cleanup, PAS-atlas builder, side-by-side release installer and expanded documentation with Mermaid architecture.
+
 ## 0.1.0-alpha.5 - 2026-08-25
 
 - **Breaking samplesheet contract:** existing sheets must add `description`, `genome`, and `technical_replicate_id`; active alpha.4 projects must finish with their versioned alpha.4 launcher.

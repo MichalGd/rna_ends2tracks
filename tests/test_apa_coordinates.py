@@ -1,6 +1,7 @@
 import unittest
 
-from rnaends2tracks.apa_a import reverse_complement, transcript_end
+from rnaends2tracks.apa_a import reverse_complement
+from rnaends2tracks.mcell2019 import transcript_end
 
 
 class FakeRead:
@@ -21,6 +22,12 @@ class CoordinateTests(unittest.TestCase):
     def test_end_defining_soft_clips(self):
         self.assertTrue(transcript_end(FakeRead(False, 100, 145, [(4, 5), (0, 45)]))[2])
         self.assertTrue(transcript_end(FakeRead(True, 100, 145, [(0, 45), (4, 5)]))[2])
+
+    def test_hard_clips_follow_the_same_defining_side_and_other_side_is_allowed(self):
+        self.assertTrue(transcript_end(FakeRead(False, 100, 145, [(5, 5), (0, 45)]))[2])
+        self.assertTrue(transcript_end(FakeRead(True, 100, 145, [(0, 45), (5, 5)]))[2])
+        self.assertFalse(transcript_end(FakeRead(False, 100, 145, [(0, 45), (4, 5)]))[2])
+        self.assertFalse(transcript_end(FakeRead(True, 100, 145, [(4, 5), (0, 45)]))[2])
 
     def test_reverse_complement(self):
         self.assertEqual(reverse_complement("AACGT"), "ACGTT")

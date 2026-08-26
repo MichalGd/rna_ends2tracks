@@ -1,7 +1,7 @@
 # Samplesheet metadata contract
 
 Each row describes one single-end R1 FASTQ from one sequencing lane. A project
-contains one genome assembly and may contain many conditions, biological samples,
+may contain GRCh38, GRCm39, or both, and may contain many conditions, biological samples,
 technical library preparations, and lanes.
 
 ## Replicate hierarchy
@@ -26,13 +26,13 @@ technical libraries to use the same lane label.
 ## Genome selection
 
 The samplesheet accepts `GRCh38` or its alias `hg38`, and `GRCm39` or its alias
-`mm39`. Aliases are normalized to the canonical assembly name. All rows in one
-project must resolve to the same assembly, which must exactly match `assembly` in
-the selected reference manifest. A mismatch stops validation before FASTQ
-processing.
+`mm39`. Aliases are normalized to the canonical assembly name. Each row selects its
+assembly-specific reference group from `config.conf`. Processing, condition-blind PAS
+discovery and contrasts remain genome-specific; cross-genome contrasts are forbidden.
+A missing or mismatched asset stops validation before FASTQ processing.
 
-The manifest—not the samplesheet alone—selects the actual FASTA, GTF, STAR index,
-chromosome sizes, and optional PAS atlas. This prevents a short genome label from
+`config.conf`—not the samplesheet alone—selects the actual FASTA, GTF, STAR index,
+chromosome sizes, and PAS atlas. This prevents a short genome label from
 silently selecting an unversioned or incompatible reference.
 
 ## Examples
@@ -63,15 +63,13 @@ Technical replication must never be encoded by duplicating a biological sample
 under new `sample_id` values. Doing so would pseudoreplicate the statistical
 analysis.
 
-## Migration from alpha.4
+## Migration to alpha.6
 
-Alpha.5 makes `description`, `genome`, and `technical_replicate_id` required
-columns. For an existing sample with one library and one lane, retain its current
+Alpha.6 retains the alpha.5 columns, uses `config.conf` for normal project settings,
+and permits mixed-genome metadata. For an existing sample with one library and one lane, retain its current
 `sample_id`, `biological_replicate_id`, and `lane_id`, set
 `technical_replicate_id` to a stable value such as `T01`, and set `genome` to the
-assembly in the reference manifest.
+assembly configured in `config.conf`.
 
-Do not change workflow release within an active project. Alpha.5 adds technical
-library IDs to intermediate filenames and read groups, so an alpha.4 project must
-finish with its versioned alpha.4 launcher. Start a new output directory when
-adopting the alpha.5 contract.
+Do not change workflow release within an active project. Finish older projects with
+their versioned launcher and start a new output directory when adopting alpha.6.

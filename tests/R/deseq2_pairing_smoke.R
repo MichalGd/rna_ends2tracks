@@ -37,27 +37,31 @@ matrix <- matrix(rnbinom(gene_count * sample_count, mu=100, size=20), nrow=gene_
 matrix[1:100, samples$condition == "B"] <- matrix[1:100, samples$condition == "B"] + 100L
 matrix[101:200, samples$condition == "C"] <- matrix[101:200, samples$condition == "C"] + 80L
 colnames(matrix) <- samples$sample_id
-counts <- data.frame(
-  Geneid=paste0("gene", seq_len(gene_count)), Chr="chr1", Start=seq_len(gene_count),
-  End=seq_len(gene_count), Strand="+", Length=100L, matrix, check.names=FALSE
-)
-counts_path <- file.path(root, "featureCounts.tsv")
+counts <- data.frame(gene_id=paste0("gene", seq_len(gene_count)), matrix, check.names=FALSE)
+counts_path <- file.path(root, "C4_active_pas_gene_counts.tsv")
 write.table(counts, counts_path, sep="\t", quote=FALSE, row.names=FALSE)
 
+factor_path <- file.path(root, "C4_track_size_factors.tsv")
 status <- system2("Rscript", c(
-  "scripts/R/deseq2_all_pairs.R",
+  "scripts/R/deseq2_c4.R",
   "--counts", counts_path,
   "--samples", samples_path,
   "--contrasts", contrasts_path,
   "--design", shQuote("~ condition"),
   "--outdir", outdir,
-  "--fdr", "0.05"
+  "--fdr", "0.05",
+  "--factor-output", factor_path
 ))
 stopifnot(status == 0L)
 index <- read.delim(file.path(outdir, "result_index.tsv"), check.names=FALSE, stringsAsFactors=FALSE)
+factors <- read.delim(factor_path, check.names=FALSE, stringsAsFactors=FALSE)
 stopifnot(nrow(index) == 2L)
+stopifnot(nrow(factors) == nrow(samples))
+stopifnot(all(is.finite(factors$size_factor) & factors$size_factor > 0))
 stopifnot(index$design_mode == c("paired", "unpaired"))
 stopifnot(index$resolved_design == c("~ subject + condition", "~ condition"))
 stopifnot(index$n_pairs == c(3L, 0L))
 stopifnot(all(file.exists(index$result_file)))
-cat("DESeq2 mixed pairing smoke: PASS\n")
+stopifnot(file.exists(file.path(outdir, "C4_deseq2_model.rds")))
+stopifnot(file.exists(file.path(outdir, "C4_vst_pca.pdf")))
+cat("C4 DESeq2 mixed pairing and track-factor smoke: PASS\n")

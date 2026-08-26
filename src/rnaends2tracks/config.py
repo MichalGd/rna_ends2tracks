@@ -3,15 +3,19 @@ from __future__ import annotations
 import csv
 import gzip
 import hashlib
+import io
 import itertools
 import json
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .conf import ConfError, project_from_conf
+from .execution import resolve_resources, write_resource_plan
 
 
 class ConfigError(ValueError):
@@ -45,6 +49,7 @@ GENOME_ALIASES = {
     "mm39": "GRCm39",
 }
 SUPPORTED_PROTOCOLS = {"quantseq_rev_v2_se", "quantseq_rev_v1_se"}
+PROTOCOL_ALIASES = {"quantseq_rev_v2": "quantseq_rev_v2_se", "quantseq_rev_v1": "quantseq_rev_v1_se"}
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SAFE_DESIGN_TERM = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
 
@@ -56,6 +61,62 @@ class RunPlan:
     sample_rows: list[dict[str, str]]
     contrasts: list[dict[str, Any]]
     reference: dict[str, Any]
+    references: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def reference_for(self, genome: str) -> dict[str, Any]:
+        references = self.references or {str(self.reference.get("assembly")): self.reference}
+        if genome not in references:
+            raise ConfigError(f"No configured reference for genome {genome}")
+        return references[genome]
+
+
+def workflow_requirements(project: dict[str, Any]) -> dict[str, bool]:
+    """Resolve core stages needed by the enabled independent modules/tracks."""
+    modules = project.get("modules", {})
+    tracks = project.get("tracks", {})
+    families = tracks.get("families", {}) if modules.get("tracks", True) else {}
+    normalizations = tracks.get("normalizations", {})
+    needs_active_pas = bool(
+        modules.get("gene_expression", True)
+        or modules.get("apa_a", True)
+        or families.get("active_pas", False)
+        or (
+            families.get("filtered_ends", False)
+            and (normalizations.get("deseq2", False) or normalizations.get("robust_cpm", False))
+        )
+    )
+    needs_exact_ends = bool(
+        needs_active_pas
+        or families.get("exact_ends", False)
+        or families.get("filtered_ends", False)
+        or families.get("rejected_ends", False)
+    )
+    return {
+        "exact_ends": needs_exact_ends,
+        "active_pas": needs_active_pas,
+        "apa_comparison": bool(modules.get("apa_a", True) and project.get("apa_b", {}).get("enabled", False)),
+    }
+
+
+def sample_universe(plan: RunPlan) -> list[dict[str, Any]]:
+    """Stable identity of the files that define condition-blind PAS discovery."""
+    universe: list[dict[str, Any]] = []
+    for sample in plan.samples:
+        lanes: list[dict[str, Any]] = []
+        for row in plan.sample_rows:
+            if row["sample_id"] != sample["sample_id"]:
+                continue
+            path = Path(row["fastq_r1"])
+            try:
+                stat = path.stat()
+                size, modified = stat.st_size, stat.st_mtime_ns
+            except OSError:
+                size, modified = None, None
+            lanes.append({"technical_replicate_id": row["technical_replicate_id"],
+                          "lane_id": row["lane_id"], "fastq_r1": str(path.resolve()),
+                          "size": size, "mtime_ns": modified})
+        universe.append({"sample_id": sample["sample_id"], "genome": sample["genome"], "lanes": lanes})
+    return universe
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -79,21 +140,36 @@ def _resolve(value: str, base: Path) -> str:
     return str(candidate.resolve())
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[str, str]]:
     path = Path(path).resolve()
     if not path.is_file():
         raise ConfigError(f"Samplesheet does not exist: {path}")
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
+        if len(reader.fieldnames or []) != len(set(reader.fieldnames or [])):
+            raise ConfigError("Samplesheet header contains duplicate column names")
         missing = [column for column in REQUIRED_COLUMNS if column not in (reader.fieldnames or [])]
         if missing:
             raise ConfigError("Samplesheet is missing columns: " + ", ".join(missing))
-        rows = [{key: (value or "").strip() for key, value in row.items()} for row in reader]
+        rows = []
+        for line_number, row in enumerate(reader, start=2):
+            if None in row:
+                raise ConfigError(f"Samplesheet line {line_number} has more values than header columns")
+            rows.append({key: (value or "").strip() for key, value in row.items()})
     if not rows:
         raise ConfigError("Samplesheet contains no data rows")
 
     base = path.parent
     seen_lanes: set[tuple[str, str, str]] = set()
+    seen_fastqs: dict[str, tuple[str, str, str]] = {}
     sample_metadata: dict[str, tuple[str, ...]] = {}
     for line_number, row in enumerate(rows, start=2):
         for key in (
@@ -119,7 +195,7 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
         if row["umi_present"].lower() not in {"false", "no", "0"}:
             raise ConfigError(f"UMIs are unsupported; umi_present must be false (line {line_number})")
         layout = row["library_layout"].upper()
-        protocol = row["library_protocol"].lower()
+        protocol = PROTOCOL_ALIASES.get(row["library_protocol"].lower(), row["library_protocol"].lower())
         if layout != "SE":
             raise ConfigError(
                 f"Only validated QuantSeq REV single-end profiles are enabled; got {layout} on line {line_number}"
@@ -135,6 +211,12 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
         row["library_protocol"] = protocol
         row["fastq_r1"] = _resolve(row["fastq_r1"], base)
         row["fastq_r2"] = _resolve(row["fastq_r2"], base)
+        prior_fastq = seen_fastqs.setdefault(row["fastq_r1"], lane_key)
+        if prior_fastq != lane_key:
+            raise ConfigError(
+                f"FASTQ R1 is assigned to more than one lane row: {row['fastq_r1']} "
+                f"({prior_fastq} and {lane_key})"
+            )
         if not row["fastq_r1"].endswith((".fastq.gz", ".fq.gz")):
             raise ConfigError(f"FASTQ R1 must be gzip-compressed on line {line_number}: {row['fastq_r1']}")
         if row["fastq_r2"]:
@@ -150,10 +232,8 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
             except (OSError, EOFError) as exc:
                 raise ConfigError(f"Cannot read gzip FASTQ: {row['fastq_r1']}: {exc}") from exc
 
-        invariant_keys = (
-            "description", "genome", "biological_replicate_id", "condition", "batch", "subject",
-            "library_protocol", "library_layout", "read_length", "kit_catalog", "umi_present",
-        )
+        lane_specific = {"technical_replicate_id", "lane_id", "fastq_r1", "fastq_r2"}
+        invariant_keys = tuple(sorted(key for key in row if key and key not in lane_specific))
         invariant = tuple(row[key] for key in invariant_keys)
         prior = sample_metadata.setdefault(row["sample_id"], invariant)
         if prior != invariant:
@@ -196,7 +276,9 @@ def validate_sample_genome(samples: list[dict[str, str]], reference: dict[str, A
         )
 
 
-def generate_contrasts(samples: list[dict[str, str]], order: list[str]) -> list[dict[str, Any]]:
+def generate_contrasts(
+    samples: list[dict[str, str]], order: list[str], min_replicates: int = 2,
+) -> list[dict[str, Any]]:
     by_condition: dict[str, set[str]] = {}
     for sample in samples:
         by_condition.setdefault(sample["condition"], set()).add(sample["biological_replicate_id"])
@@ -206,9 +288,11 @@ def generate_contrasts(samples: list[dict[str, str]], order: list[str]) -> list[
         raise ConfigError("condition_order is missing observed conditions: " + ", ".join(unknown))
     if absent:
         raise ConfigError("condition_order contains conditions absent from samples: " + ", ".join(absent))
-    eligible = [condition for condition in order if len(by_condition[condition]) >= 2]
+    eligible = [condition for condition in order if len(by_condition[condition]) >= min_replicates]
     if len(eligible) < 2:
-        raise ConfigError("At least two conditions with >=2 biological replicates are required")
+        raise ConfigError(
+            f"At least two conditions with >={min_replicates} biological replicates are required"
+        )
     contrasts: list[dict[str, Any]] = []
     for denominator, numerator in itertools.combinations(eligible, 2):
         n_num = len(by_condition[numerator])
@@ -397,7 +481,7 @@ def load_reference(project: dict[str, Any], check_files: bool = True) -> dict[st
             raise ConfigError(f"Reference asset does not exist ({key}): {ref[key]}")
     if ref.get("pas_atlas"):
         ref["pas_atlas"] = _resolve(str(ref["pas_atlas"]), base)
-        if check_files and not Path(ref["pas_atlas"]).is_file():
+        if check_files and not Path(ref["pas_atlas"]).exists():
             raise ConfigError(f"PAS atlas does not exist: {ref['pas_atlas']}")
     if check_files:
         _validate_reference_assets(ref)
@@ -474,15 +558,46 @@ def _validate_reference_assets(ref: dict[str, Any]) -> None:
     if unknown:
         raise ConfigError("GTF has contigs absent from FASTA: " + ", ".join(unknown[:10]))
     if ref.get("pas_atlas"):
-        opener = gzip.open if str(ref["pas_atlas"]).endswith(".gz") else open
+        atlas_path = Path(ref["pas_atlas"])
+        if atlas_path.is_dir():
+            atlas_dir = atlas_path
+            required = ("core.bed.gz", "rescue.bed.gz", "master.tsv.gz", "provenance.json", "SHA256SUMS")
+            missing = [name for name in required if not (atlas_dir / name).is_file()]
+            if missing:
+                raise ConfigError(f"PAS atlas directory is incomplete ({atlas_dir}): " + ", ".join(missing))
+            try:
+                provenance = json.loads((atlas_dir / "provenance.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ConfigError(f"Invalid PAS atlas provenance: {atlas_dir / 'provenance.json'}") from exc
+            if provenance.get("assembly") != ref["assembly"] or provenance.get("species") != ref["species"]:
+                raise ConfigError("PAS atlas species/assembly does not match the reference profile")
+            checksums: dict[str, str] = {}
+            for line in (atlas_dir / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+                expected, _, name = line.partition("  ")
+                if expected and name:
+                    checksums[name] = expected
+            for name in ("core.bed.gz", "rescue.bed.gz", "master.tsv.gz", "provenance.json"):
+                if name not in checksums:
+                    raise ConfigError(f"PAS atlas checksum is missing for {name}")
+                digest = _sha256_file(atlas_dir / name)
+                if digest != checksums[name]:
+                    raise ConfigError(f"PAS atlas checksum mismatch: {atlas_dir / name}")
+            ref["pas_atlas_checksums"] = {
+                name: checksums[name]
+                for name in ("core.bed.gz", "rescue.bed.gz", "master.tsv.gz", "provenance.json")
+            }
+            atlas_path = atlas_dir / "core.bed.gz"
+        opener = gzip.open if str(atlas_path).endswith(".gz") else open
         atlas_contigs: set[str] = set()
-        with opener(ref["pas_atlas"], "rt", encoding="utf-8") as handle:
+        with opener(atlas_path, "rt", encoding="utf-8") as handle:
             for line in handle:
                 if line and not line.startswith(("#", "track", "browser")):
                     atlas_contigs.add(line.split("\t", 1)[0])
         unknown_atlas = sorted(atlas_contigs - fasta_contigs)
         if unknown_atlas:
             raise ConfigError("PAS atlas has contigs absent from FASTA: " + ", ".join(unknown_atlas[:10]))
+        if "pas_atlas_checksums" not in ref:
+            ref["pas_atlas_checksums"] = {atlas_path.name: _sha256_file(atlas_path)}
 
 
 def build_plan(config_path: str | Path, samplesheet_path: str | Path, check_inputs: bool = True) -> RunPlan:
@@ -535,29 +650,150 @@ def build_plan(config_path: str | Path, samplesheet_path: str | Path, check_inpu
     return RunPlan(project, samples, rows, contrasts, reference)
 
 
+def build_conf_plan(config_path: str | Path, check_inputs: bool = True) -> RunPlan:
+    """Build the normal-run contract from one restricted config.conf and its samplesheet."""
+    try:
+        project, samplesheet_path = project_from_conf(config_path)
+    except ConfError as exc:
+        raise ConfigError(str(exc)) from exc
+    if not SAFE_ID.fullmatch(str(project.get("project_id", ""))):
+        raise ConfigError("PROJECT_ID must be a filesystem-safe identifier")
+    try:
+        project["resources"], resource_warnings = resolve_resources(project)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    project["_warnings"] = resource_warnings
+    rows = load_samplesheet(samplesheet_path, check_fastqs=check_inputs)
+    profile = PROTOCOL_ALIASES.get(
+        str(project["protocol"]["profile"]).lower(), str(project["protocol"]["profile"]).lower()
+    )
+    project["protocol"]["profile"] = profile
+    if profile not in SUPPORTED_PROTOCOLS:
+        raise ConfigError(f"Unsupported LIBRARY_PROTOCOL: {profile}")
+    if {row["library_protocol"] for row in rows} != {profile}:
+        raise ConfigError("Samplesheet library_protocol does not match LIBRARY_PROTOCOL")
+    samples = collapse_samples(rows)
+    sample_ids = [sample["sample_id"] for sample in samples]
+    if len(sample_ids) != len(set(sample_ids)):
+        raise ConfigError("sample_id values must identify unique biological analysis units")
+    replicate_owner: dict[tuple[str, str], str] = {}
+    for sample in samples:
+        key = (sample["genome"], sample["biological_replicate_id"])
+        prior = replicate_owner.setdefault(key, sample["sample_id"])
+        if prior != sample["sample_id"]:
+            raise ConfigError(
+                f"biological_replicate_id {key[1]} belongs to multiple sample IDs in {key[0]}"
+            )
+
+    references: dict[str, dict[str, Any]] = {}
+    observed_genomes = list(dict.fromkeys(sample["genome"] for sample in samples))
+    raw_references = project["references"]
+    for genome in observed_genomes:
+        raw = raw_references.get(genome)
+        if not isinstance(raw, dict) or not all(raw.get(key) for key in ("fasta", "gtf", "star_index", "chrom_sizes", "pas_atlas")):
+            raise ConfigError(f"Complete reference and PAS-atlas paths are required for observed genome {genome}")
+        references[genome] = load_reference({**project, "reference": raw}, check_files=check_inputs)
+        if check_inputs and not Path(references[genome]["pas_atlas"]).is_dir():
+            raise ConfigError(
+                f"Normal alpha.6 runs require a versioned PAS-atlas directory for {genome}, not a standalone BED"
+            )
+
+    contrasts: list[dict[str, Any]] = []
+    configured_order = project.get("condition_order", [])
+    all_observed_conditions = {sample["condition"] for sample in samples}
+    unknown_configured = sorted(set(configured_order) - all_observed_conditions)
+    if unknown_configured:
+        raise ConfigError(
+            "CONDITION_ORDER contains conditions absent from the samplesheet: "
+            + ", ".join(unknown_configured)
+        )
+    for genome in observed_genomes:
+        genome_samples = [sample for sample in samples if sample["genome"] == genome]
+        observed_conditions = list(dict.fromkeys(sample["condition"] for sample in genome_samples))
+        if configured_order:
+            omitted = sorted(set(observed_conditions) - set(configured_order))
+            if omitted:
+                raise ConfigError(
+                    f"CONDITION_ORDER omits observed {genome} conditions: " + ", ".join(omitted)
+                )
+            order = [condition for condition in configured_order if condition in observed_conditions]
+        else:
+            order = observed_conditions
+        counts = Counter(sample["condition"] for sample in genome_samples)
+        eligible = [condition for condition in order if counts[condition] >= project["statistics"]["min_replicates"]]
+        generated = generate_contrasts(
+            genome_samples, order, project["statistics"]["min_replicates"]
+        ) if len(eligible) >= 2 else []
+        resolved = resolve_contrast_designs(genome_samples, generated, project)
+        for contrast in resolved:
+            contrast["genome"] = genome
+            if len(observed_genomes) > 1:
+                contrast["contrast_id"] = f"{genome}.{contrast['contrast_id']}"
+        contrasts.extend(resolved)
+    if not contrasts:
+        raise ConfigError("No within-genome condition pair has the required biological replication")
+
+    for genome, reference in references.items():
+        expected = max(int(row["read_length"]) for row in rows if row["genome"] == genome) - 1
+        observed = reference.get("star_sjdb_overhang")
+        if observed is not None and observed != expected:
+            reference.setdefault("_warnings", []).append({
+                "warning_code": "STAR_SJDB_OVERHANG_REVIEW",
+                "message": f"{genome}: STAR sjdbOverhang={observed}; maximum read length suggests {expected}",
+            })
+    return RunPlan(project, samples, rows, contrasts, references[observed_genomes[0]], references)
+
+
 def write_plan(plan: RunPlan, outdir: str | Path) -> None:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    with (outdir / "resolved_config.json").open("w", encoding="utf-8") as handle:
-        payload = dict(plan.project)
-        payload.pop("_config_path", None)
-        payload["reference"] = plan.reference
-        json.dump(payload, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    payload = dict(plan.project)
+    payload.pop("_config_path", None)
+    payload.pop("references", None)
+    payload["references"] = plan.references or {plan.reference["assembly"]: plan.reference}
+    _write_text_if_changed(
+        outdir / "resolved_config.json", json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    )
     _write_tsv(outdir / "validated_samples.tsv", plan.samples)
     _write_tsv(outdir / "validated_lanes.tsv", plan.sample_rows)
     _write_tsv(outdir / "contrasts.tsv", plan.contrasts)
-    _write_tsv(outdir / "warnings.tsv", plan.reference.get("_warnings", []))
+    warnings = list(plan.project.get("_warnings", []))
+    for reference in (plan.references or {plan.reference["assembly"]: plan.reference}).values():
+        warnings.extend(reference.get("_warnings", []))
+    _write_tsv(outdir / "warnings.tsv", warnings)
+    resolved_rows: list[dict[str, Any]] = []
+    for section, values in sorted(plan.project.items()):
+        if section.startswith("_"):
+            continue
+        if isinstance(values, dict):
+            for key, value in sorted(values.items()):
+                if not isinstance(value, dict):
+                    resolved_rows.append({"section": section, "key": key, "value": value})
+        else:
+            resolved_rows.append({"section": "project", "key": section, "value": values})
+    _write_tsv(outdir / "resolved_config.tsv", resolved_rows)
+    write_resource_plan(plan.project["resources"], {
+        "samples": len(plan.samples), "lanes": len(plan.sample_rows), "contrasts": len(plan.contrasts),
+    }, outdir / "resource_plan.tsv")
 
 
 def _write_tsv(path: Path, rows: list[dict[str, Any]]) -> None:
-    if not rows:
-        path.write_text("", encoding="utf-8")
-        return
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]), delimiter="\t", lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(rows)
+    output = io.StringIO(newline="")
+    if rows:
+        writer = csv.DictWriter(output, fieldnames=list(rows[0]), delimiter="\t", lineterminator="\n")
+        writer.writeheader(); writer.writerows(rows)
+    _write_text_if_changed(path, output.getvalue())
+
+
+def _write_text_if_changed(path: Path, content: str) -> None:
+    try:
+        if path.read_text(encoding="utf-8") == content:
+            return
+    except OSError:
+        pass
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(path)
 
 
 def signature_for(paths: list[str | Path], parameters: dict[str, Any]) -> str:

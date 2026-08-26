@@ -1,7 +1,7 @@
 species: mouse
 assembly: GRCm39
 provider: GENCODE
-release: "set-explicit-release"
+release: "GENCODE_vM31"
 fasta: /shared/references/mouse/GRCm39/genome.fa
 gtf: /shared/references/mouse/GRCm39/annotation.gtf
 star_index: /shared/references/mouse/GRCm39/STAR_index
@@ -11,5 +11,5 @@ gtf_sha256: ""
 star_index_fasta_sha256: ""
 star_index_gtf_sha256: ""
 chrom_sizes: /shared/references/mouse/GRCm39/GRCm39.chrom.sizes
-pas_atlas: /shared/references/mouse/GRCm39/polyasite.bed.gz
+pas_atlas: /shared/references/mouse/GRCm39/GRCm39_gencode_vM31_pas_atlas_v1
 coordinate_convention: "FASTA/GTF genomic; BED outputs zero-based half-open"

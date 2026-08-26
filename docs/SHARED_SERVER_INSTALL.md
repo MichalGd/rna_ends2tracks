@@ -1,5 +1,7 @@
 # Shared-server installation
 
+> Historical alpha.5 procedure. For alpha.6 and later use [server_installation.md](server_installation.md); the YAML details below are retained only as deployment history.
+
 The workflow contains no usernames, home-directory assumptions or fixed project paths. Install one read-only software environment and reference set, while each user writes results to a project directory they own.
 
 ## Recommended administrator procedure
@@ -35,9 +37,9 @@ PolyAseqTrap and its pinned DeepIP model are deliberately installed as a separat
 Copy the project configuration, samplesheet and one reference-manifest template into the project. Use absolute paths for production FASTQs and references. Validate before submitting compute jobs:
 
 ```bash
-rna-ends2tracks --config project.yaml --samplesheet samples.csv validate
-rna-ends2tracks --config project.yaml --samplesheet samples.csv --dry-run all
-rna-ends2tracks --config project.yaml --samplesheet samples.csv all
+rna-ends2tracks --stop-after validate config/config.conf
+rna-ends2tracks --dry-run config/config.conf
+rna-ends2tracks config/config.conf
 ```
 
 For a scheduler, invoke individual modules in dependency jobs (`preprocess`, then `dge`/`apa-a`/`apa-b`, then `compare` and `report`). Every user runs the same executable; project configuration supplies species and paths.

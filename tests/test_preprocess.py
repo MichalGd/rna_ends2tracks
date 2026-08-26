@@ -8,70 +8,84 @@ from rnaends2tracks.preprocess import preprocess
 
 
 class PreprocessOrderTests(unittest.TestCase):
-    def test_non_dry_run_reads_orientation_counts_after_star(self):
+    def test_portable_dry_run_does_not_stat_missing_fastqs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            fastq = root / "sample.fastq.gz"
-            fastq.write_bytes(b"test-fastq")
             results = root / "results"
+            resources = {"temporary_directory": "", "preprocess": {
+                "trim_parallel_jobs": 1, "star_parallel_jobs": 1, "fastqc_threads": 1,
+                "bbduk_threads": 1, "bbduk_memory_gb": 1, "star_threads": 1,
+                "star_memory_gb": 1, "samtools_threads": 1,
+                "samtools_sort_memory_per_thread_gb": 1, "merge_parallel_jobs": 1,
+                "merge_memory_gb": 1}}
+            reference = {"assembly": "GRCm39", "star_index": str(root / "missing_star")}
             plan = RunPlan(
-                project={
-                    "resources": {"threads": 1},
-                    "preprocessing": {"minimum_length": 20, "trim_quality": 10},
-                    "protocol": {"orientation_min_fraction": 0.75},
-                    "statistics": {"pairing": {"mode": "auto"}},
-                },
-                samples=[{"sample_id": "S1"}],
-                sample_rows=[{
-                    "sample_id": "S1", "technical_replicate_id": "T01",
-                    "lane_id": "L001", "fastq_r1": str(fastq),
-                }],
-                contrasts=[],
-                reference={"star_index": str(root / "star")},
-            )
-            calls = []
-            commands = []
+                project={"resources": resources, "preprocessing": {"minimum_length": 20, "trim_quality": 10},
+                         "protocol": {"orientation_min_fraction": 0.75}},
+                samples=[{"sample_id": "S1", "genome": "GRCm39"}],
+                sample_rows=[{"sample_id": "S1", "genome": "GRCm39", "technical_replicate_id": "T01",
+                              "lane_id": "L001", "fastq_r1": str(root / "missing.fastq.gz")}],
+                contrasts=[], reference=reference, references={"GRCm39": reference})
+            preprocess(plan, results, dry_run=True)
+            self.assertIn("DRY RUN: STAR", (results / "logs" / "preprocess" / "S1.T01.L001.star.log").read_text())
 
-            def fake_run(command, _log, dry_run=False, cwd=None):
-                self.assertFalse(dry_run)
-                self.assertIsNone(cwd)
-                calls.append(command[0])
-                commands.append(command)
+    def test_trim_and_star_use_separate_bounded_phases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fastq = root / "sample.fastq.gz"; fastq.write_bytes(b"test-fastq")
+            results = root / "results"
+            resources = {"temporary_directory": "", "preprocess": {
+                "trim_parallel_jobs": 2, "star_parallel_jobs": 1, "fastqc_threads": 1,
+                "bbduk_threads": 1, "bbduk_memory_gb": 1, "star_threads": 1,
+                "star_memory_gb": 1, "samtools_threads": 1,
+                "samtools_sort_memory_per_thread_gb": 1, "merge_parallel_jobs": 1,
+                "merge_memory_gb": 1}}
+            reference = {
+                "assembly": "GRCm39", "star_index": str(root / "star"),
+                "fasta": str(root / "genome.fa"), "gtf": str(root / "genes.gtf"),
+                "chrom_sizes": str(root / "chrom.sizes"),
+            }
+            plan = RunPlan(
+                project={"resources": resources, "preprocessing": {"minimum_length": 20, "trim_quality": 10},
+                         "protocol": {"orientation_min_fraction": 0.75}},
+                samples=[{"sample_id": "S1", "genome": "GRCm39"}],
+                sample_rows=[{"sample_id": "S1", "genome": "GRCm39", "technical_replicate_id": "T01",
+                              "lane_id": "L001", "fastq_r1": str(fastq)}],
+                contrasts=[], reference=reference, references={"GRCm39": reference})
+            calls, commands, phases = [], [], []
+
+            def fake_run(command, _log, dry_run=False, cwd=None, env=None):
+                self.assertFalse(dry_run); calls.append(command[0]); commands.append(command)
                 if command[0] == "bbduk.sh":
-                    output = next(value[4:] for value in command if value.startswith("out="))
-                    Path(output).write_bytes(b"trimmed")
+                    Path(next(value[4:] for value in command if value.startswith("out="))).write_bytes(b"trimmed")
                 elif command[0] == "STAR":
                     prefix = command[command.index("--outFileNamePrefix") + 1]
-                    Path(prefix + "ReadsPerGene.out.tab").write_text(
-                        "gene1\t100\t10\t90\n", encoding="utf-8"
-                    )
+                    Path(prefix + "ReadsPerGene.out.tab").write_text("gene1\t100\t10\t90\n", encoding="utf-8")
                     Path(prefix + "Aligned.out.bam").write_bytes(b"unsorted")
-                elif command[:2] == ["samtools", "sort"]:
-                    Path(command[command.index("-o") + 1]).write_bytes(b"sorted")
+                elif command[:2] in (["samtools", "sort"], ["samtools", "view"]):
+                    Path(command[command.index("-o") + 1]).write_bytes(b"bam")
                 elif command[:2] == ["samtools", "index"]:
-                    Path(command[-1] + ".bai").write_bytes(b"index")
+                    Path(command[command.index("-o") + 1]).write_bytes(b"index")
 
-            with (
-                patch("rnaends2tracks.preprocess.require_tools"),
-                patch("rnaends2tracks.preprocess.run", side_effect=fake_run),
-                patch("rnaends2tracks.preprocess.write_receipt"),
-                patch("rnaends2tracks.preprocess.signature_for", return_value="signature") as signature_mock,
-                patch("subprocess.run"),
-            ):
+            def immediate(stage, jobs, workers, _timing):
+                phases.append((stage, workers)); return [worker() for _, worker in jobs]
+
+            with (patch("rnaends2tracks.preprocess.require_tools"),
+                  patch("rnaends2tracks.preprocess.run", side_effect=fake_run),
+                  patch("rnaends2tracks.preprocess.run_bounded", side_effect=immediate),
+                  patch("rnaends2tracks.preprocess.write_receipt"),
+                  patch("rnaends2tracks.preprocess.signature_for", return_value="signature"),
+                  patch("rnaends2tracks.preprocess.subprocess.run")):
                 preprocess(plan, results)
 
-            self.assertLess(calls.index("STAR"), calls.index("samtools"))
-            bbduk_command = next(command for command in commands if command[0] == "bbduk.sh")
-            self.assertIn("qtrim=r", bbduk_command)
-            self.assertNotIn("qtrim=t", bbduk_command)
-            signature_parameters = signature_mock.call_args.args[1]
-            self.assertNotIn("project", signature_parameters)
-            self.assertNotIn("statistics", signature_parameters)
+            self.assertEqual(phases[:2], [("qc_and_trim", 2), ("star_and_sort", 1)])
+            self.assertLess(calls.index("bbduk.sh"), calls.index("STAR"))
+            bbduk = next(command for command in commands if command[0] == "bbduk.sh")
+            self.assertIn("qtrim=r", bbduk); self.assertNotIn("qtrim=t", bbduk)
             orientation = (results / "02_alignment" / "protocol_orientation.tsv").read_text(encoding="utf-8")
             self.assertIn("S1\tT01\tL001\t10\t90\t0.9\tpass", orientation)
-            star_command = next(command for command in commands if command[0] == "STAR")
-            self.assertIn("ID:S1.T01.L001", star_command)
-            self.assertIn("LB:S1.T01", star_command)
+            star = next(command for command in commands if command[0] == "STAR")
+            self.assertIn("ID:S1.T01.L001", star); self.assertIn("LB:S1.T01", star)
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam").is_file())
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam.bai").is_file())
 

@@ -1,3 +1,3 @@
 """rna_ends2tracks public package."""
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a6"

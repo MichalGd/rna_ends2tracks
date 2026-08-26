@@ -5,16 +5,15 @@ import gzip
 import json
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 import pysam
 
 from .config import RunPlan, signature_for
 from .external import event, require_tools, run
 from .receipts import receipt_valid, write_receipt
-
 
 PAS_MOTIFS = ("AATAAA", "ATTAAA", "TATAAA", "AGTAAA", "AAGAAA", "AATATA", "AATACA", "CATAAA")
 
@@ -57,7 +56,6 @@ def _attributes(text: str) -> dict[str, str]:
 def load_genes(gtf_path: str) -> tuple[dict[str, Gene], dict[tuple[str, str, int], set[str]]]:
     opener = gzip.open if gtf_path.endswith(".gz") else open
     genes: dict[str, Gene] = {}
-    features: list[tuple[str, str, int, int, str, str]] = []
     with opener(gtf_path, "rt", encoding="utf-8") as handle:
         for line in handle:
             if not line or line.startswith("#"):
