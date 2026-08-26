@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-alpha.7 - 2026-08-26
+
+- Fix the shared installer immutability audit so normal Conda symbolic links do not cause a false failure.
+- Add a regression test that distinguishes writable symlinks from writable real files and directories.
+
 ## 0.1.0-alpha.6 - 2026-08-26
 
 - Replaced the normal YAML interface with one restricted, commented `config.conf` plus one combined lane-level samplesheet.

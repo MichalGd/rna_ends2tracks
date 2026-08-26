@@ -7,3 +7,4 @@ python3 -m unittest discover -s "${SCRIPT_DIR}" -p 'test_*.py' -v
 for script in "${PROJECT_ROOT}"/bin/*.sh "${PROJECT_ROOT}"/scripts/bash/*.sh "${PROJECT_ROOT}"/tests/*.sh; do
   bash -n "$script"
 done
+bash "${SCRIPT_DIR}/test_install_release_immutability.sh"

@@ -41,6 +41,7 @@ jobs:
           sudo apt-get install --yes shellcheck
           find bin scripts/bash tests -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
           find bin scripts/bash tests -type f -name '*.sh' -print0 | xargs -0 shellcheck
+          bash tests/test_install_release_immutability.sh
       - uses: r-lib/actions/setup-r@v2
       - name: Parse R modules
         shell: Rscript {0}
