@@ -6,9 +6,35 @@ get_arg <- function(name, default=NULL) {
   args[[pos + 1]]
 }
 as_flag <- function(value) tolower(value) == "true"
+suppressPackageStartupMessages({library(msigdbr); library(fgsea); library(ggplot2)})
+if ("--self-test" %in% args) {
+  fetch <- function(species, collection, subcollection=NULL) {
+    formal_names <- names(formals(msigdbr::msigdbr))
+    call <- list(species=species)
+    if ("db_species" %in% formal_names) call$db_species <- "HS"
+    if ("collection" %in% formal_names) call$collection <- collection else call$category <- collection
+    if (!is.null(subcollection)) {
+      if ("subcollection" %in% formal_names) call$subcollection <- subcollection else call$subcategory <- subcollection
+    }
+    suppressWarnings(do.call(msigdbr::msigdbr, call))
+  }
+  hallmark_human <- fetch("Homo sapiens", "H")
+  hallmark_mouse <- fetch("Mus musculus", "H")
+  go_bp <- fetch("Homo sapiens", "C5", "GO:BP")
+  reactome <- fetch("Homo sapiens", "C2", "CP:REACTOME")
+  stopifnot(nrow(hallmark_human) > 0, nrow(hallmark_mouse) > 0, nrow(go_bp) > 0, nrow(reactome) > 0)
+  gene_column <- if ("ensembl_gene" %in% colnames(hallmark_human)) "ensembl_gene" else "db_ensembl_gene"
+  pathways <- split(hallmark_human[[gene_column]], hallmark_human$gs_id)
+  gene_ids <- unique(unlist(pathways)); gene_ids <- gene_ids[nzchar(gene_ids)]
+  stats <- setNames(seq(-2, 2, length.out=length(gene_ids)), gene_ids)
+  result <- suppressWarnings(fgsea::fgseaMultilevel(pathways=head(pathways, 3), stats=stats, minSize=5, maxSize=500))
+  stopifnot(is.data.frame(as.data.frame(result)))
+  invisible(ggplot2::ggplot(data.frame(x=1, y=1), ggplot2::aes(x, y)) + ggplot2::geom_point())
+  message("Gene-set database and fgsea self-test: PASS")
+  quit(save="no", status=0)
+}
 required <- c("--input", "--outdir", "--analysis-type", "--species", "--genome", "--contrast-id")
 for (item in required) if (is.null(get_arg(item))) stop(paste("Required argument:", item))
-suppressPackageStartupMessages({library(msigdbr); library(fgsea); library(ggplot2)})
 
 input <- get_arg("--input")
 outdir <- get_arg("--outdir")
