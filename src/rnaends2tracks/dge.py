@@ -102,6 +102,7 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
         bams = [results / "02_alignment" / sample_id / f"{sample_id}.bam" for sample_id in sample_ids]
         c4 = results / "04_active_pas" / genome / "C4_active_pas_gene_counts.tsv"
         outdir = module_dir / genome
+        outdir.mkdir(parents=True, exist_ok=True)
         c5 = outdir / "C5_featureCounts_diagnostic.tsv"
         diagnostic = outdir / "C4_vs_C5_library_correlations.tsv"
         discrepancies = outdir / "C4_vs_C5_large_discrepancies.tsv"
