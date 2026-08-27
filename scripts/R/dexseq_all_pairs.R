@@ -35,6 +35,18 @@ tabular_dexseq_result <- function(result) {
   result
 }
 
+pooled_raw_for_pas <- function(pooled_counts, pas_ids) {
+  ids <- as.character(pas_ids)
+  missing <- setdiff(ids, names(pooled_counts))
+  if (length(missing)) {
+    stop(
+      "Comparator PAS absent from the C3 count matrix: ",
+      paste(head(missing, 10), collapse=", ")
+    )
+  }
+  unname(pooled_counts[match(ids, names(pooled_counts))])
+}
+
 if ("--self-test" %in% args) {
   unpaired <- dexseq_formulas("~ condition")
   stopifnot(
@@ -54,7 +66,19 @@ if ("--self-test" %in% args) {
   write.table(clean, target, sep="\t", quote=FALSE, row.names=FALSE)
   stopifnot(file.exists(target), nrow(read.delim(target, check.names=FALSE)) == 2)
   unlink(target)
-  cat("DEXSeq paired/unpaired formula and serialization self-test: PASS\n")
+  raw_fixture <- matrix(
+    c(1L, 2L, 10L, 20L), nrow=2,
+    dimnames=list(c("p1", "p2"), c("s1", "s2"))
+  )
+  pooled_fixture <- rowSums(raw_fixture)
+  factor_ids <- factor(c("p2", "p1"), levels=c("p1", "p2", "unused"))
+  stopifnot(identical(pooled_raw_for_pas(pooled_fixture, factor_ids), c(22, 11)))
+  missing_error <- tryCatch(
+    { pooled_raw_for_pas(pooled_fixture, "absent"); "" },
+    error=function(condition) conditionMessage(condition)
+  )
+  stopifnot(grepl("Comparator PAS absent from the C3 count matrix: absent", missing_error, fixed=TRUE))
+  cat("DEXSeq formula, serialization, and comparator lookup self-test: PASS\n")
   quit(save="no", status=0)
 }
 
@@ -133,6 +157,7 @@ for (i in seq_len(nrow(contrasts))) {
   den <- rowMeans(norm[, sample_data$condition == con$denominator, drop=FALSE])
   num <- rowMeans(norm[, sample_data$condition == con$numerator, drop=FALSE])
   all_mean <- rowMeans(norm)
+  pooled_raw_counts <- rowSums(count_matrix[, rownames(sample_data), drop=FALSE])
   genes <- catalog$gene_id[match(rownames(norm), catalog$pas_id)]
   den_total <- ave(den, genes, FUN=sum); num_total <- ave(num, genes, FUN=sum)
   result$mean_normalized_count <- all_mean[match(result$pas_id, rownames(norm))]
@@ -165,7 +190,7 @@ for (i in seq_len(nrow(contrasts))) {
           ratio_numerator="NA", ratio_denominator="NA", comparator_rule="no_nonzero_comparator", stringsAsFactors=FALSE)
         next
       }
-      pooled_raw <- rowSums(mat[other$pas_id, , drop=FALSE])
+      pooled_raw <- pooled_raw_for_pas(pooled_raw_counts, other$pas_id)
       other <- other[order(-other$mean_normalized_count, -pooled_raw, other$summit_start), , drop=FALSE]
       chosen <- rbind(ordered[1, , drop=FALSE], other[1, , drop=FALSE])
       comparator_rule <- "one_significant_vs_highest_mean_normalized_other"

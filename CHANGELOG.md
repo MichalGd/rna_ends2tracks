@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.9.post2 - 2026-08-27
+
+- Fix APA-A fallback-comparator selection when DEXSeq returns factor-valued feature IDs: coerce PAS IDs to character and resolve them explicitly against named project C3 counts.
+- Compute pooled raw counts once per contrast and fail with an actionable message if a comparator PAS is absent from the C3 matrix.
+- Add regression coverage for factor-valued PAS IDs, deterministic requested-ID order, missing PAS detection, and alpha.9.post1 receipt reuse.
+
 ## 0.1.0-alpha.9.post1 - 2026-08-27
 
 - Fix unpaired APA-A DEXSeq formulas so a design without pairing covariates does not create a stray `:exon` term.
