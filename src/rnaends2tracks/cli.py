@@ -23,6 +23,7 @@ from .config import (
     write_plan,
 )
 from .dge import gene_expression
+from .enrichment import enrichment
 from .external import event, read_run_status
 from .locking import run_lock
 from .paths import workflow_asset
@@ -32,7 +33,7 @@ from .tracks import make_c0_tracks, make_tracks
 
 STEPS = (
     "validate", "alignment", "c0_tracks", "exact_ends", "active_pas", "gene_expression",
-    "apa_a", "apa_b", "apa_comparison", "tracks", "report", "cleanup",
+    "apa_a", "apa_b", "apa_comparison", "enrichment", "tracks", "report", "cleanup",
 )
 ALIASES = {
     "preprocess": "alignment", "early_tracks": "c0_tracks",
@@ -139,6 +140,7 @@ def _status_observations(results: Path, payload: dict[str, object]) -> dict[str,
         "DGE": len(list((results / "05_gene_expression").rglob("*.deseq2.tsv"))),
         "APA-A": len(list((results / "06_apa_a_mcell2019").rglob("*.dexseq.tsv"))),
         "APA-B": len(list((results / "07_apa_b").rglob("*.drimseq_stager.tsv"))),
+        "enrichment": len(list((results / "10_reports" / "enrichment_summary").rglob("enrichment.png"))),
         "reports": int((results / "10_reports" / "report.html").is_file()),
     }
     return {
@@ -220,6 +222,8 @@ def execute(args: argparse.Namespace) -> int:
             "apa_a": lambda: apa_statistics_stage(plan, results, script_root, args.dry_run, "apa_a" in forced),
             "apa_b": lambda: apa_b(plan, results, script_root, args.dry_run, "apa_b" in forced),
             "apa_comparison": lambda: compare_apa(plan, results, force="apa_comparison" in forced),
+            "enrichment": lambda: enrichment(
+                plan, results, script_root, args.dry_run, "enrichment" in forced),
             "tracks": lambda: make_tracks(plan, results, args.dry_run, "tracks" in forced),
             "report": lambda: make_report(plan, results, args.dry_run, "report" in forced),
             "cleanup": lambda: clean_intermediates(plan, results, args.dry_run, "cleanup" in forced),
@@ -252,6 +256,11 @@ def execute(args: argparse.Namespace) -> int:
                 continue
             if step == "apa_comparison" and not requirements["apa_comparison"]:
                 event(results / "logs", step, "disabled", "APA comparison requires both APA-A and APA-B")
+                continue
+            if step == "enrichment" and not (
+                modules.get("dge_enrichment", True) or modules.get("apa_enrichment", True)
+            ):
+                event(results / "logs", step, "disabled", "DGE and APA enrichment are disabled")
                 continue
             if step == "tracks" and not modules.get("tracks", True):
                 event(results / "logs", step, "disabled", "RUN_TRACKS=false")

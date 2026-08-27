@@ -85,6 +85,7 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
     signature = signature_for(signature_inputs, {
         "module": "gene_expression", "contrasts": plan.contrasts,
         "design": plan.project["design"], "reporting": plan.project["reporting"],
+        "plot_lfc": plan.project.get("enrichment", {}).get("dge_min_abs_lfc", 1.0),
     }) if not dry_run else "dry-run"
     if not force and not dry_run and receipt_valid(module_dir, signature):
         event(log_dir, "gene_expression", "skipped", "Valid C4/C5 gene-expression receipt")
@@ -118,6 +119,7 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
             "--counts", str(c4), "--samples", str(results / "00_metadata" / "validated_samples.tsv"),
             "--contrasts", str(results / "00_metadata" / "contrasts.tsv"), "--design", str(plan.project["design"]),
             "--outdir", str(primary), "--fdr", str(plan.project["reporting"]["fdr"]),
+            "--plot-lfc", str(plan.project.get("enrichment", {}).get("dge_min_abs_lfc", 1.0)),
             "--factor-output", str(factor_path),
         ]
         run([
@@ -143,18 +145,25 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
                 receipt_root=primary / ".receipts", index_path=index_path,
                 parallel_jobs=resource["contrast_parallel_jobs"], threads=resource["contrast_threads"],
                 memory_gb=resource["contrast_memory_gb"],
-                output_suffixes=[".deseq2.tsv", ".deseq2_model.rds", ".MA.pdf"],
+                output_suffixes=[
+                    ".deseq2.tsv", ".deseq2_model.rds", ".MA.pdf", ".MA.png",
+                    ".volcano.pdf", ".volcano.png",
+                ],
                 signature_inputs=[c4, results / "00_metadata" / "validated_samples.tsv", results / "00_metadata" / "contrasts.tsv"],
                 signature_parameters={
                     "genome": genome, "design": plan.project["design"],
                     "reporting": plan.project["reporting"],
+                    "plot_lfc": plan.project.get("enrichment", {}).get("dge_min_abs_lfc", 1.0),
                 }, dry_run=dry_run, force=force,
             )
         if not dry_run:
             _write_c4_c5_diagnostic(c4, c5, sample_ids, diagnostic, discrepancies)
         expected.extend([c5, Path(str(c5) + ".summary"), diagnostic, discrepancies,
                          factor_path, primary / "C4_deseq2_model.rds",
-                         primary / "C4_normalized_counts.tsv", primary / "C4_vst_pca.pdf"])
+                         primary / "C4_normalized_counts.tsv", primary / "C4_vst_pca.tsv",
+                         primary / "C4_vst_pca.pdf", primary / "C4_vst_pca.png",
+                         primary / "C4_sample_distances.tsv", primary / "C4_sample_distances.pdf",
+                         primary / "C4_sample_distances.png"])
         if contrasts:
             expected.append(index_path)
             if not dry_run:
@@ -163,7 +172,10 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
                         contrast_id = row["contrast_id"]
                         expected.extend([Path(row["result_file"]),
                                          primary / f"{contrast_id}.deseq2_model.rds",
-                                         primary / f"{contrast_id}.MA.pdf"])
+                                         primary / f"{contrast_id}.MA.pdf",
+                                         primary / f"{contrast_id}.MA.png",
+                                         primary / f"{contrast_id}.volcano.pdf",
+                                         primary / f"{contrast_id}.volcano.png"])
     if not dry_run:
         write_receipt("gene_expression", module_dir, signature, expected, ["rna-ends2tracks", "gene_expression"])
     event(log_dir, "gene_expression", "dry_run" if dry_run else "completed", "C4 primary DGE; C5 diagnostic only")

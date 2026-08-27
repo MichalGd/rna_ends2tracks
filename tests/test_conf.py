@@ -55,6 +55,19 @@ class ConfTests(unittest.TestCase):
                 "http://example.test/project",
             )
 
+    def test_enrichment_controls_and_apa_b_manifest_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); config = root / "config.conf"
+            base = "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+            config.write_text(base + "ENRICHMENT_MIN_GENESET_SIZE=600\nENRICHMENT_MAX_GENESET_SIZE=500\n",
+                              encoding="utf-8")
+            with self.assertRaisesRegex(ConfError, "must not exceed"):
+                project_from_conf(config)
+            config.write_text(base + "RUN_APA_B=true\nAPA_B_PILOT_ACCEPTED=true\nAPA_B_COMMAND_TEMPLATE=adapter\n",
+                              encoding="utf-8")
+            with self.assertRaisesRegex(ConfError, "APA_B_VALIDATION_MANIFEST"):
+                project_from_conf(config)
+
     def test_mixed_genomes_create_only_within_genome_contrasts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

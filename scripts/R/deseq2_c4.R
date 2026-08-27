@@ -15,6 +15,7 @@ contrasts <- read.delim(get_arg("--contrasts"), check.names=FALSE, stringsAsFact
 default_design_text <- get_arg("--design")
 outdir <- get_arg("--outdir")
 fdr <- as.numeric(get_arg("--fdr", "0.05"))
+plot_lfc <- as.numeric(get_arg("--plot-lfc", "1"))
 mode <- get_arg("--mode", "all")
 contrast_id <- get_arg("--contrast-id", "")
 index_file <- get_arg("--index-file", file.path(outdir, "result_index.tsv"))
@@ -76,9 +77,26 @@ if (mode %in% c("all", "qc")) {
   vsd <- varianceStabilizingTransformation(dds, blind=FALSE)
   pca <- plotPCA(vsd, intgroup="condition", returnData=TRUE)
   percent <- round(100 * attr(pca, "percentVar"))
+  pca$sample_id <- rownames(pca)
+  write.table(pca, file.path(outdir, "C4_vst_pca.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
   plot <- ggplot(pca, aes(PC1, PC2, color=condition, label=name)) + geom_point(size=3) +
+    geom_text(vjust=-0.7, check_overlap=TRUE) +
     xlab(paste0("PC1: ", percent[1], "%")) + ylab(paste0("PC2: ", percent[2], "%")) + theme_bw()
   ggsave(file.path(outdir, "C4_vst_pca.pdf"), plot, width=7, height=5)
+  ggsave(file.path(outdir, "C4_vst_pca.png"), plot, width=7, height=5, dpi=150)
+  distance_matrix <- as.matrix(dist(t(assay(vsd))))
+  write.table(distance_matrix, file.path(outdir, "C4_sample_distances.tsv"), sep="\t", quote=FALSE, col.names=NA)
+  distance_long <- data.frame(
+    sample_x=rep(colnames(distance_matrix), each=nrow(distance_matrix)),
+    sample_y=rep(rownames(distance_matrix), times=ncol(distance_matrix)),
+    distance=as.vector(distance_matrix), stringsAsFactors=FALSE
+  )
+  distance_plot <- ggplot(distance_long, aes(sample_x, sample_y, fill=distance)) +
+    geom_tile() + scale_fill_gradient(low="white", high="#2166AC") +
+    labs(x=NULL, y=NULL, fill="VST distance") + theme_bw() +
+    theme(axis.text.x=element_text(angle=60, hjust=1))
+  ggsave(file.path(outdir, "C4_sample_distances.pdf"), distance_plot, width=8, height=7)
+  ggsave(file.path(outdir, "C4_sample_distances.png"), distance_plot, width=8, height=7, dpi=150)
 }
 if (mode == "qc") quit(save="no", status=0)
 if (nzchar(contrast_id)) {
@@ -103,11 +121,30 @@ for (i in seq_len(nrow(contrasts))) {
   target <- file.path(outdir, paste0(con$contrast_id, ".deseq2.tsv"))
   model_target <- file.path(outdir, paste0(con$contrast_id, ".deseq2_model.rds"))
   ma_target <- file.path(outdir, paste0(con$contrast_id, ".MA.pdf"))
+  ma_png_target <- file.path(outdir, paste0(con$contrast_id, ".MA.png"))
+  volcano_target <- file.path(outdir, paste0(con$contrast_id, ".volcano.pdf"))
+  volcano_png_target <- file.path(outdir, paste0(con$contrast_id, ".volcano.png"))
   write.table(table, target, sep="\t", quote=FALSE, row.names=FALSE)
   saveRDS(dds, model_target)
   pdf(ma_target); plotMA(result, alpha=fdr); dev.off()
+  png(ma_png_target, width=1050, height=750, res=150); plotMA(result, alpha=fdr); dev.off()
+  volcano <- table
+  volcano$minus_log10_padj <- -log10(pmax(volcano$padj, .Machine$double.xmin))
+  volcano$significance <- ifelse(
+    !is.na(volcano$padj) & volcano$padj < fdr & volcano$log2FoldChange >= plot_lfc, "up",
+    ifelse(!is.na(volcano$padj) & volcano$padj < fdr & volcano$log2FoldChange <= -plot_lfc, "down", "not_significant")
+  )
+  volcano_plot <- ggplot(volcano, aes(log2FoldChange, minus_log10_padj, color=significance)) +
+    geom_point(alpha=0.55, size=1) +
+    scale_color_manual(values=c(down="#2166AC", not_significant="#BDBDBD", up="#B2182B")) +
+    geom_vline(xintercept=c(-plot_lfc, plot_lfc), linetype="dashed", color="#555555") +
+    geom_hline(yintercept=-log10(fdr), linetype="dashed", color="#555555") +
+    labs(title=con$contrast_id, x="log2 fold change", y="-log10 adjusted P", color=NULL) + theme_bw()
+  ggsave(volcano_target, volcano_plot, width=7, height=5)
+  ggsave(volcano_png_target, volcano_plot, width=7, height=5, dpi=150)
   index[[length(index) + 1]] <- data.frame(
     contrast_id=con$contrast_id, result_file=target, significant=sum(!is.na(table$padj) & table$padj < fdr),
+    ma_pdf=ma_target, ma_png=ma_png_target, volcano_pdf=volcano_target, volcano_png=volcano_png_target,
     design_mode=con$design_mode, resolved_design=design_text, paired=con$paired, n_pairs=con$n_pairs,
     warning=con$design_status, stringsAsFactors=FALSE
   )

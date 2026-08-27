@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import RunPlan, signature_for, workflow_requirements
 from .external import event
+from .provenance import generate_provenance_dashboard
 from .receipts import receipt_valid, write_receipt
 
 
@@ -247,6 +248,70 @@ def _html_table(
     return f"<div class='table-wrap'><table{identifier}><thead><tr>{headings}</tr></thead><tbody>{body}</tbody></table></div>"
 
 
+def _image_gallery(outdir: Path, images: list[tuple[str, Path]]) -> str:
+    cards: list[str] = []
+    for label, path in images:
+        if not path.is_file():
+            continue
+        href = path.relative_to(outdir).as_posix() if path.is_relative_to(outdir) else "../" + path.relative_to(outdir.parent).as_posix()
+        cards.append(
+            "<figure><a href='" + html.escape(href) + "'><img loading='lazy' src='" + html.escape(href) +
+            "' alt='" + html.escape(label) + "'></a><figcaption>" + html.escape(label) + "</figcaption></figure>"
+        )
+    return "<div class='gallery'>" + "".join(cards) + "</div>" if cards else "<p>No plot was available.</p>"
+
+
+def _apa_b_interpretation(plan: RunPlan) -> tuple[str, list[dict[str, Any]]]:
+    settings = plan.project.get("apa_b", {})
+    if not settings.get("enabled", False):
+        return "DISABLED_NOT_VALIDATED", [{
+            "property": "Interpretation status", "value": "DISABLED_NOT_VALIDATED",
+        }, {
+            "property": "Meaning",
+            "value": "APA-B results were not generated and must not be inferred from APA-A.",
+        }]
+    manifest = Path(str(settings.get("validation_manifest", "")))
+    try:
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "INVALID_VALIDATION_MANIFEST", [{"property": "Validation manifest", "value": str(manifest)}]
+    engine = value.get("engine", {})
+    return "VALIDATED_PILOT_ACCEPTED", [
+        {"property": "Interpretation status", "value": "VALIDATED_PILOT_ACCEPTED"},
+        {"property": "Engine", "value": engine.get("name", "")},
+        {"property": "Pinned source commit", "value": engine.get("source_commit", "")},
+        {"property": "Reviewed by", "value": value.get("reviewed_by", "")},
+        {"property": "Accepted at", "value": value.get("accepted_at", "")},
+        {"property": "Assemblies", "value": ", ".join(value.get("assemblies", []))},
+        {"property": "UMI / coordinate deduplication", "value": "disabled / disabled"},
+    ]
+
+
+def _apa_b_gene_events(results: Path, fdr: float, limit: int = 100) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    root = results / "07_apa_b"
+    for index_path in sorted(root.rglob("result_index.tsv")) if root.is_dir() else []:
+        genome = index_path.relative_to(root).parts[0]
+        for index in _rows(index_path):
+            summary = Path(index.get("gene_summary_file", ""))
+            if not summary.is_file():
+                continue
+            for row in _rows(summary):
+                adjusted = _number(row.get("gene_padj"))
+                if adjusted is None or adjusted > fdr:
+                    continue
+                events.append({
+                    "genome": genome, "contrast_id": index.get("contrast_id", ""),
+                    "gene_id": row.get("gene_id", ""), "gene_padj": adjusted,
+                    "shift": row.get("shift", ""),
+                    "max_abs_delta_PAU": row.get("max_abs_delta_PAU", ""),
+                    "weighted_transcript_position_shift_nt": row.get("weighted_transcript_position_shift_nt", ""),
+                    "confirmed_sites": row.get("confirmed_sites", ""),
+                })
+    events.sort(key=lambda row: float(row["gene_padj"]))
+    return events[:limit]
+
+
 def _track_collections(results: Path) -> tuple[list[Path], list[dict[str, Any]]]:
     track_root = results / "09_tracks"
     bigwigs = sorted(track_root.rglob("*.bw")) if track_root.is_dir() else []
@@ -370,6 +435,11 @@ def _main_artifacts(results: Path, outdir: Path) -> list[dict[str, str]]:
         ("Combined one-line UCSC descriptors", outdir / "ucsc_track_descriptors" / "UCSC_bigWig_tracks.oneline.txt"),
         ("IGV session", outdir / "IGV_session.xml"),
         ("Full contrast summary", outdir / "contrast_summary.tsv"),
+        ("Enrichment result index", outdir / "enrichment_summary" / "enrichment_index.tsv"),
+        ("Provenance dashboard", outdir / "provenance_dashboard" / "dashboard.json"),
+        ("Receipt inventory", outdir / "provenance_dashboard" / "receipt_inventory.tsv"),
+        ("Environment packages", outdir / "provenance_dashboard" / "environment_packages.tsv"),
+        ("Complete output manifest", outdir / "provenance_dashboard" / "output_manifest.tsv"),
     ]
     for root, label in (
         (results / "05_gene_expression", "DGE result index"),
@@ -470,6 +540,7 @@ def make_report(
     outdir.mkdir(parents=True, exist_ok=True)
     inputs = [results / "00_metadata" / name for name in (
         "contrasts.tsv", "validated_samples.tsv", "resolved_config.json", "warnings.tsv")]
+    inputs.extend(Path(str(plan.project.get(key, ""))) for key in ("_config_path", "_samplesheet_path"))
     inputs.extend(
         results / directory / "run_receipt.json"
         for directory in (
@@ -493,6 +564,12 @@ def make_report(
     inputs.append(results / "02_alignment" / "protocol_orientation.tsv")
     inputs.extend(sorted((results / "03_exact_ends").glob("*/*/end_audit.json")))
     inputs.extend(sorted((results / "04_active_pas").glob("*/count_universe_audit.json")))
+    inputs.extend(sorted((results / "05_gene_expression").rglob("*.png")))
+    inputs.extend(sorted((results / "10_reports" / "enrichment_summary").rglob("*.tsv")))
+    inputs.append(results / "10_reports" / "enrichment_summary" / "run_receipt.json")
+    validation_manifest = Path(str(plan.project.get("apa_b", {}).get("validation_manifest", "")))
+    if validation_manifest.is_file():
+        inputs.append(validation_manifest)
     inputs = [path for path in inputs if path.is_file()]
     signature = signature_for(inputs, {
         "module": "report", "project": plan.project["project_id"],
@@ -511,6 +588,12 @@ def make_report(
     warnings = _rows(results / "00_metadata" / "warnings.tsv")
     enabled_modules = plan.project.get("modules", {})
     requirements = workflow_requirements(plan.project)
+    enrichment_enabled = bool(
+        (enabled_modules.get("dge_enrichment", False) and enabled_modules.get("gene_expression", True))
+        or (enabled_modules.get("apa_enrichment", False) and (
+            enabled_modules.get("apa_a", True) or plan.project.get("apa_b", {}).get("enabled", False)
+        ))
+    )
     modules = [
         ("alignment", "02_alignment", True),
         ("exact ends", "03_exact_ends", requirements["exact_ends"]),
@@ -519,6 +602,8 @@ def make_report(
         ("APA-A", "06_apa_a_mcell2019", enabled_modules.get("apa_a", True)),
         ("APA-B", "07_apa_b", plan.project.get("apa_b", {}).get("enabled", False)),
         ("APA comparison", "08_apa_comparison", requirements["apa_comparison"]),
+        ("gene-set enrichment", "10_reports/enrichment_summary",
+         enrichment_enabled),
         ("tracks", "09_tracks", enabled_modules.get("tracks", True)),
     ]
     module_rows = [{"module": label, "status": _receipt_status(results / directory) if enabled else "DISABLED"}
@@ -532,12 +617,34 @@ def make_report(
     contrast_summary = outdir / "contrast_summary.tsv"
     _write_tsv(contrast_summary, contrast_rows, CONTRAST_SUMMARY_FIELDS)
     browser, track_rows = _browser_assets(plan, results, outdir)
+    provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
     artifact_rows = _main_artifacts(results, outdir)
     samples = _rows(results / "00_metadata" / "validated_samples.tsv")
     star_rows = _star_qc_rows(results)
     orientation_rows = _rows(results / "02_alignment" / "protocol_orientation.tsv")
     funnel_rows = _exact_funnel_rows(results)
     active_pas_rows = _active_pas_rows(results)
+    enrichment_rows = _rows(outdir / "enrichment_summary" / "enrichment_index.tsv")
+    apa_b_status, apa_b_rows = _apa_b_interpretation(plan)
+    apa_b_gene_events = _apa_b_gene_events(
+        results, float(plan.project.get("reporting", {}).get("fdr", 0.05)),
+    ) if apa_b_status == "VALIDATED_PILOT_ACCEPTED" else []
+    plot_images: list[tuple[str, Path]] = []
+    for genome in sorted(plan.references):
+        primary = results / "05_gene_expression" / genome / "C4_primary_deseq2"
+        plot_images.extend([
+            (f"{genome} C4 variance-stabilized PCA", primary / "C4_vst_pca.png"),
+            (f"{genome} sample-distance heatmap", primary / "C4_sample_distances.png"),
+        ])
+        for row in _rows(primary / "result_index.tsv"):
+            for field, label in (("ma_png", "MA"), ("volcano_png", "volcano")):
+                if row.get(field):
+                    plot_images.append((f"{genome} {row['contrast_id']} {label}", Path(row[field])))
+    enrichment_images = [
+        (f"{row.get('genome', '')} {row.get('contrast_id', '')} {row.get('analysis_type', '')} enrichment",
+         Path(row["plot_png"]))
+        for row in enrichment_rows if row.get("plot_png")
+    ]
     sample_fields = [field for field in (
         "sample_id", "description", "genome", "condition", "batch", "subject",
         "biological_replicate_id", "technical_replicate_count", "sequencing_lane_count",
@@ -570,6 +677,18 @@ def make_report(
         f"{row['apa_a_proximal_genes']} | {row['apa_a_pcpa']} |"
         for row in contrast_rows
     )
+    lines += ["", "## Gene-set enrichment", "",
+              "| Analysis | Genome | Contrast | Foreground genes | Significant ORA | Significant GSEA |",
+              "|---|---|---|---:|---:|---:|"]
+    lines.extend(
+        f"| {row.get('analysis_type', '')} | {row.get('genome', '')} | {row.get('contrast_id', '')} | "
+        f"{row.get('foreground_genes', '')} | {row.get('significant_ora_terms', '')} | "
+        f"{row.get('significant_gsea_terms', '')} |" for row in enrichment_rows
+    )
+    if not enrichment_rows:
+        lines.append("| disabled/unavailable |  |  |  |  |  |")
+    lines += ["", "## APA-B validation and interpretation", "", f"- Status: `{apa_b_status}`"]
+    lines.extend(f"- {row['property']}: {row['value']}" for row in apa_b_rows)
     lines += [
         "", "## Scientific interpretation", "",
         (
@@ -591,6 +710,7 @@ def make_report(
         "- `ucsc_track_descriptors/UCSC_bigWig_tracks.oneline.txt`: combined UCSC custom-track lines.",
         "- `UCSC_trackDb.txt`: compatibility copy using the same one-line syntax.",
         "- `IGV_session.xml`: session containing every generated BigWig.",
+        "- `provenance_dashboard/`: receipt, environment, reference and complete output inventories.",
     ]
     markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -621,8 +741,9 @@ def make_report(
     ) + "</ul>"
     body = "".join([
         "<nav><a href='#overview'>Overview</a> | <a href='#samples'>Samples</a> | <a href='#qc'>QC</a> | "
-        "<a href='#results'>Differential results</a> | <a href='#tracks'>Tracks</a> | "
-        "<a href='#files'>Main files</a></nav>",
+        "<a href='#results'>Differential results</a> | <a href='#plots'>Plots</a> | "
+        "<a href='#enrichment'>Enrichment</a> | <a href='#apa-b'>APA-B</a> | "
+        "<a href='#tracks'>Tracks</a> | <a href='#provenance'>Provenance</a></nav>",
         f"<h1>rna_ends2tracks report: {html.escape(plan.project['project_id'])}</h1>",
         "<p class='note'>QuantSeq REV gene-expression and alternative-polyadenylation summary. "
         "Intragenic PAS are candidate premature cleavage/polyadenylation events; this assay alone "
@@ -658,17 +779,42 @@ def make_report(
         "<p>Blank cells mean that the corresponding optional analysis was disabled or unavailable.</p>",
         "<label>Filter contrasts: <input id='contrast-filter' type='search' placeholder='condition, genome, result...'></label>",
         _html_table(contrast_rows, CONTRAST_SUMMARY_FIELDS, "contrast-table"),
+        "<h2 id='plots'>DGE exploratory and contrast plots</h2>",
+        "<p>PCA and sample-distance plots use variance-stabilized C4 counts. MA and volcano plots are "
+        "generated independently for every pairwise contrast.</p>",
+        _image_gallery(outdir, plot_images),
+        "<h2 id='enrichment'>Gene-set enrichment</h2>",
+        "<p>ORA uses significant foreground genes; ranked GSEA uses the complete tested background. "
+        "APA queries distinguish any APA, distal/proximal shifts, and candidate PCPA increases/decreases. "
+        "Mouse gene sets use the orthology mapping recorded in each provenance file.</p>",
+        _html_table(enrichment_rows, [field for field in (
+            "analysis_type", "genome", "contrast_id", "background_genes", "foreground_genes",
+            "significant_ora_terms", "significant_gsea_terms", "status",
+        ) if any(field in row for row in enrichment_rows)]) if enrichment_rows else "<p>Enrichment was disabled or unavailable.</p>",
+        _image_gallery(outdir, enrichment_images),
+        "<h2 id='apa-b'>APA-B validation and interpretation</h2>",
+        f"<p><strong>{html.escape(apa_b_status)}</strong></p>", _html_table(apa_b_rows, ["property", "value"]),
+        "<p>APA-A and APA-B are independent analyses. Their catalogs are never merged; when both are validated, "
+        "the workflow reports proximity and effect-direction concordance separately.</p>",
+        "<h3>Top validated APA-B gene-level events</h3>",
+        _html_table(apa_b_gene_events, [
+            "genome", "contrast_id", "gene_id", "gene_padj", "shift", "max_abs_delta_PAU",
+            "weighted_transcript_position_shift_nt", "confirmed_sites",
+        ]) if apa_b_gene_events else "<p>No validated APA-B gene-level event passed the configured FDR, or APA-B was disabled.</p>",
         "<h2>Warnings</h2>", _html_table(warning_rows, ["warning_code", "message"]),
         "<h2 id='tracks'>BigWig track collections</h2>",
         "<p>Every row is a folder collection. Plus and minus are separate transcript-strand tracks. "
         "Minus BigWigs contain negative values; the generated UCSC descriptors can display their magnitude "
         "above zero with <code>negateValues=on</code>.</p>",
         _html_table(track_rows, ["collection", "description", "bigwigs", "transcript_plus", "transcript_minus"]),
-        "<h2 id='files'>Main reports and data indexes</h2>", artifact_html,
+        "<h2 id='provenance'>Provenance dashboard and main files</h2>",
+        "<p>The dashboard inventories stage receipts, software/environment packages, reference and PAS-atlas "
+        "identities, configuration checksums, and every output file. Large files are validated by size and "
+        "modification time; small files also receive SHA-256 checksums.</p>", artifact_html,
         "<h2>Report scope</h2><p>This alpha.10 report integrates run status, samples, count-universe definitions, "
-        "validated DGE/APA contrast counts, warnings, browser-track inventories, and links to primary indexes. "
-        "MultiQC remains the detailed sequencing/alignment QC report. Enrichment plots and the planned "
-        "independent APA-B interpretation are not fabricated when those modules are unavailable.</p>",
+        "validated DGE/APA contrast counts, embedded statistical plots, enrichment results, warnings, browser-track "
+        "inventories, and complete provenance. MultiQC remains the detailed sequencing/alignment QC report. "
+        "APA-B interpretation is explicitly marked unavailable unless its pinned pilot validation passes.</p>",
     ])
     html_target.write_text(
         "<!doctype html><html><head><meta charset='utf-8'><title>rna_ends2tracks report</title>"
@@ -678,12 +824,14 @@ def make_report(
         "th,td{border:1px solid #ccd5dd;padding:.4rem .55rem;text-align:left;white-space:nowrap}"
         "th{background:#e9eff4;position:sticky;top:0}tbody tr:nth-child(even){background:#f8fafb}"
         "a{color:#145d91}nav{position:sticky;top:0;background:#fff;padding:.7rem 0;border-bottom:1px solid #ccd5dd}"
-        "input[type=search]{min-width:22rem;padding:.35rem}</style></head>"
+        "input[type=search]{min-width:22rem;padding:.35rem}.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:1rem}"
+        "figure{margin:0;border:1px solid #ccd5dd;padding:.6rem;background:#fff}figure img{width:100%;height:auto}figcaption{font-size:.85rem;margin-top:.4rem}</style></head>"
         f"<body>{body}<script>const q=document.getElementById('contrast-filter');"
         "if(q){q.addEventListener('input',()=>{const v=q.value.toLowerCase();"
         "document.querySelectorAll('#contrast-table tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(v));});}"
         "</script></body></html>\n", encoding="utf-8")
-    outputs = [markdown, html_target, summary, contrast_summary, *browser]
+    provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
+    outputs = [markdown, html_target, summary, contrast_summary, *browser, *provenance_outputs]
     write_receipt("report", outdir, signature, outputs, ["rna-ends2tracks", "report"])
     event(log_dir, "report", "completed", str(html_target))
     return html_target

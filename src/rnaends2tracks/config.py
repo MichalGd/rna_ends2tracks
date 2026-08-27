@@ -772,8 +772,15 @@ def write_plan(plan: RunPlan, outdir: str | Path) -> None:
         else:
             resolved_rows.append({"section": "project", "key": section, "value": values})
     _write_tsv(outdir / "resolved_config.tsv", resolved_rows)
+    modules = plan.project.get("modules", {})
+    enrichment_branches = int(bool(modules.get("dge_enrichment", False) and modules.get("gene_expression", True)))
+    enrichment_branches += int(bool(modules.get("apa_enrichment", False) and modules.get("apa_a", True)))
+    enrichment_branches += int(bool(
+        modules.get("apa_enrichment", False) and plan.project.get("apa_b", {}).get("enabled", False)
+    ))
     write_resource_plan(plan.project["resources"], {
         "samples": len(plan.samples), "lanes": len(plan.sample_rows), "contrasts": len(plan.contrasts),
+        "enrichment_jobs": enrichment_branches * len(plan.contrasts),
     }, outdir / "resource_plan.tsv")
 
 

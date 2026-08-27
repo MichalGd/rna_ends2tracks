@@ -367,7 +367,7 @@ def apa_statistics_stage(
             receipt_root=outdir / ".receipts", index_path=index_path,
             parallel_jobs=plan.project["resources"]["apa_a"]["contrast_parallel_jobs"], threads=1,
             memory_gb=plan.project["resources"]["apa_a"]["contrast_memory_gb"],
-            output_suffixes=[".dexseq.tsv", ".apa_shift.tsv"],
+            output_suffixes=[".dexseq.tsv", ".apa_shift.tsv", ".gene_apa_summary.tsv"],
             signature_inputs=[active_root / genome / "C3_active_pas_counts.tsv", active_root / genome / "active_pas_catalog.tsv"],
             signature_parameters={
                 "design": plan.project["design"], "genome": genome,
@@ -383,7 +383,10 @@ def apa_statistics_stage(
         stats_outputs.extend([index_path, pcpa_path])
         with index_path.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
-                stats_outputs.extend([Path(row["result_file"]), Path(row["shift_file"])])
+                stats_outputs.extend([
+                    Path(row["result_file"]), Path(row["shift_file"]),
+                    Path(row["gene_summary_file"]),
+                ])
     if stats_outputs:
         stats_signature = signature_for(active_inputs, {
             "module": "apa_a_statistics", "contrasts": plan.contrasts,

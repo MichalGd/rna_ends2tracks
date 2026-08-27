@@ -52,6 +52,11 @@ DEFAULT_RESOURCES: dict[str, Any] = {
         "contrast_threads": 1,
         "contrast_memory_gb": 16,
     },
+    "enrichment": {
+        "parallel_jobs": 1,
+        "threads": 1,
+        "memory_gb": 16,
+    },
     "tracks": {
         "parallel_jobs": 2,
         "samtools_threads": 4,
@@ -106,7 +111,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     for key in ("total_threads", "total_memory_gb", "temporary_directory"):
         if key in supplied:
             resolved[key] = supplied[key]
-    for stage in ("preprocess", "dge", "apa_a", "apa_b", "tracks"):
+    for stage in ("preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
         stage_value = supplied.get(stage, {})
         if not isinstance(stage_value, dict):
             raise ValueError(f"resources.{stage} must be a YAML mapping")  # noqa: TRY004
@@ -118,7 +123,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     resolved["total_threads"] = _positive_int(resolved["total_threads"], "resources.total_threads")
     resolved["total_memory_gb"] = _positive_int(resolved["total_memory_gb"], "resources.total_memory_gb")
     resolved["temporary_directory"] = str(resolved.get("temporary_directory", "") or "")
-    for stage in ("preprocess", "dge", "apa_a", "apa_b", "tracks"):
+    for stage in ("preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
         for key, value in list(resolved[stage].items()):
             resolved[stage][key] = _positive_int(value, f"resources.{stage}.{key}")
 
@@ -142,6 +147,7 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
     dge = resources["dge"]
     apa_a = resources["apa_a"]
     apa_b = resources["apa_b"]
+    enrichment = resources["enrichment"]
     tracks = resources["tracks"]
     definitions = [
         ("preprocess", "qc_and_trim", "external_process", counts.get("lanes", 0), pre["trim_parallel_jobs"],
@@ -165,6 +171,8 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
          apa_b["engine_threads"], apa_b["engine_memory_gb"]),
         ("apa_b", "contrast", "external_process", counts.get("contrasts", 0), apa_b["contrast_parallel_jobs"],
          apa_b["contrast_threads"], apa_b["contrast_memory_gb"]),
+        ("enrichment", "analysis", "external_process", counts.get("enrichment_jobs", counts.get("contrasts", 0)),
+         enrichment["parallel_jobs"], enrichment["threads"], enrichment["memory_gb"]),
         ("tracks", "c0_sample", "python_process_and_external_process", counts.get("samples", 0), tracks["parallel_jobs"],
          tracks["samtools_threads"], tracks["memory_gb"]),
         ("tracks", "end_sample", "python_process_and_external_process", counts.get("samples", 0), tracks["parallel_jobs"],

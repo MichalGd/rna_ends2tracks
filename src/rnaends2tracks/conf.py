@@ -20,6 +20,22 @@ DEFAULTS: dict[str, str] = {
     "RUN_APA_B": "false",
     "APA_B_PILOT_ACCEPTED": "false",
     "APA_B_COMMAND_TEMPLATE": "",
+    "APA_B_VALIDATION_MANIFEST": "",
+    "APA_B_THREADS": "8",
+    "RUN_DGE_ENRICHMENT": "true",
+    "RUN_APA_ENRICHMENT": "true",
+    "ENRICHMENT_ORA": "true",
+    "ENRICHMENT_GSEA": "true",
+    "ENRICHMENT_GO": "true",
+    "ENRICHMENT_REACTOME": "true",
+    "ENRICHMENT_HALLMARKS": "true",
+    "ENRICHMENT_KEGG": "false",
+    "ENRICHMENT_PADJ": "0.05",
+    "ENRICHMENT_DGE_MIN_ABS_LFC": "1.0",
+    "ENRICHMENT_APA_MIN_ABS_DELTA_PAU": "0.10",
+    "ENRICHMENT_MIN_GENESET_SIZE": "10",
+    "ENRICHMENT_MAX_GENESET_SIZE": "500",
+    "ENRICHMENT_PARALLEL_JOBS": "3",
     "RUN_TRACKS": "true",
     "GENERATE_EARLY_C0_TRACKS": "true",
     "LIBRARY_PROTOCOL": "quantseq_rev_v2_se",
@@ -178,6 +194,16 @@ def _positive_float(values: dict[str, str], key: str) -> float:
     return value
 
 
+def _nonnegative_float(values: dict[str, str], key: str) -> float:
+    try:
+        value = float(values[key])
+    except ValueError as exc:
+        raise ConfError(f"{key} must be numeric") from exc
+    if value < 0:
+        raise ConfError(f"{key} must be >= 0")
+    return value
+
+
 def _path(value: str, base: Path) -> str:
     if not value:
         return ""
@@ -208,6 +234,16 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         raise ConfError("RUN_APA_B=true requires explicit APA_B_PILOT_ACCEPTED=true")
     if _bool(values, "RUN_APA_B") and not values["APA_B_COMMAND_TEMPLATE"].strip():
         raise ConfError("RUN_APA_B=true requires APA_B_COMMAND_TEMPLATE")
+    if _bool(values, "RUN_APA_B") and not values["APA_B_VALIDATION_MANIFEST"].strip():
+        raise ConfError("RUN_APA_B=true requires APA_B_VALIDATION_MANIFEST")
+    if _bool(values, "ENRICHMENT_KEGG"):
+        raise ConfError("ENRICHMENT_KEGG=true is not implemented in alpha.10; use GO, Reactome, or Hallmark")
+    if not (_bool(values, "ENRICHMENT_ORA") or _bool(values, "ENRICHMENT_GSEA")):
+        raise ConfError("At least one of ENRICHMENT_ORA or ENRICHMENT_GSEA must be true")
+    minimum_geneset = _int(values, "ENRICHMENT_MIN_GENESET_SIZE")
+    maximum_geneset = _int(values, "ENRICHMENT_MAX_GENESET_SIZE")
+    if minimum_geneset > maximum_geneset:
+        raise ConfError("ENRICHMENT_MIN_GENESET_SIZE must not exceed ENRICHMENT_MAX_GENESET_SIZE")
     if (_bool(values, "RUN_TRACKS") and not _bool(values, "GENERATE_BIGWIGS")
             and not (_bool(values, "RETAIN_BEDGRAPH") or _bool(values, "KEEP_BEDGRAPHS"))):
         raise ConfError("Track generation requires BigWig and/or retained bedGraph output")
@@ -260,6 +296,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
     }
     project: dict[str, Any] = {
         "_config_path": values["_CONFIG_PATH"],
+        "_samplesheet_path": _path(values["SAMPLESHEET"], base),
         "_config_format": "conf",
         "project_id": values["PROJECT_ID"],
         "output_dir": _path(values["OUTPUT_DIR"], base),
@@ -284,6 +321,8 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "gene_expression": _bool(values, "RUN_GENE_EXPRESSION"),
             "apa_a": _bool(values, "RUN_APA_A_MCELL2019"),
             "apa_b": _bool(values, "RUN_APA_B"), "tracks": _bool(values, "RUN_TRACKS"),
+            "dge_enrichment": _bool(values, "RUN_DGE_ENRICHMENT"),
+            "apa_enrichment": _bool(values, "RUN_APA_ENRICHMENT"),
         },
         "references": references,
         "statistics": {
@@ -311,8 +350,18 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "apa_b": {
             "enabled": _bool(values, "RUN_APA_B"), "pilot_accepted": _bool(values, "APA_B_PILOT_ACCEPTED"),
             "command_template": values["APA_B_COMMAND_TEMPLATE"],
+            "validation_manifest": _path(values["APA_B_VALIDATION_MANIFEST"], base),
         },
         "reporting": {"fdr": _float(values, "FDR"), "min_abs_delta_pau": _float(values, "MIN_ABS_DELTA_PAU")},
+        "enrichment": {
+            "ora": _bool(values, "ENRICHMENT_ORA"), "gsea": _bool(values, "ENRICHMENT_GSEA"),
+            "go": _bool(values, "ENRICHMENT_GO"), "reactome": _bool(values, "ENRICHMENT_REACTOME"),
+            "hallmarks": _bool(values, "ENRICHMENT_HALLMARKS"), "kegg": False,
+            "padj": _float(values, "ENRICHMENT_PADJ"),
+            "dge_min_abs_lfc": _nonnegative_float(values, "ENRICHMENT_DGE_MIN_ABS_LFC"),
+            "apa_min_abs_delta_pau": _nonnegative_float(values, "ENRICHMENT_APA_MIN_ABS_DELTA_PAU"),
+            "min_geneset_size": minimum_geneset, "max_geneset_size": maximum_geneset,
+        },
         "tracks": {
             "early_c0": _bool(values, "GENERATE_EARLY_C0_TRACKS"),
             "families": {
@@ -359,9 +408,11 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "apa_a": {"extraction_parallel_jobs": _int(values, "END_EXTRACTION_PARALLEL_JOBS"), "extraction_threads": 1,
                       "extraction_memory_gb": 4, "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"),
                       "contrast_threads": 1, "contrast_memory_gb": 16},
-            "apa_b": {"engine_threads": _int(values, "STAR_THREADS"), "engine_memory_gb": 24,
+            "apa_b": {"engine_threads": _int(values, "APA_B_THREADS"), "engine_memory_gb": 24,
                       "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"), "contrast_threads": 1,
                       "contrast_memory_gb": 16},
+            "enrichment": {"parallel_jobs": _int(values, "ENRICHMENT_PARALLEL_JOBS"),
+                           "threads": 1, "memory_gb": 16},
             "tracks": {"parallel_jobs": _int(values, "TRACK_PARALLEL_JOBS"),
                        "samtools_threads": _int(values, "TRACK_THREADS"), "memory_gb": 8},
         },

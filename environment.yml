@@ -19,6 +19,8 @@ dependencies:
   - bioconductor-dexseq=1.52
   - bioconductor-drimseq=1.34
   - bioconductor-stager=1.28
+  - bioconductor-fgsea
+  - r-msigdbr
   - r-ggplot2=3.5
   - deeptools=3.5
   - rseqc=5.0

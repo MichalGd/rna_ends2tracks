@@ -675,7 +675,7 @@ The `rnaseq2tracksP` R Markdown report is visually more polished and includes co
 
 Generate one self-contained, navigable HTML report plus machine-readable source tables. The report should be built only after all enabled analytical and enrichment branches finish, then become a cleanup gate.
 
-Implementation checkpoint: `10_reports/contrast_summary.tsv` and the HTML contrast table now recount DGE, APA-A, optional APA-B, differential PCPA, and APA-method concordance directly from their source tables. Reporting fails if a DGE/APA index count disagrees with the corresponding result file. The HTML now includes validated samples, a text-filterable contrast table, direct links to MultiQC and result indexes, a C0-C5 legend, and a collection-level BigWig table. Every report run creates a one-column `bigwig_collections.txt`, per-collection one-line UCSC descriptor files, one combined descriptor, and an IGV session. Public UCSC prefixes, minus-track negation, and view limits are controlled in `config.conf`. The remaining work is QC-funnel aggregation, embedded diagnostic/statistical plots, enrichment sections, richer per-result links, and full sortable/collapsible presentation.
+Implementation checkpoint: `10_reports/contrast_summary.tsv` and the HTML contrast table now recount DGE, APA-A, optional validated APA-B, differential PCPA, and APA-method concordance directly from their source tables. Reporting fails if a DGE/APA index count disagrees with the corresponding result file. The HTML includes validated samples, STAR/orientation/count-funnel QC, a text-filterable contrast table, a C0-C5 legend, embedded PCA/sample-distance/MA/volcano plots, independent enrichment sections, explicit APA-B validation state, a collection-level BigWig table, and a complete provenance dashboard. Every report run creates a one-column `bigwig_collections.txt`, per-collection one-line UCSC descriptor files, one combined descriptor, and an IGV session. Public UCSC prefixes, minus-track negation, and view limits are controlled in `config.conf`. Further UI refinement may add collapsible/sortable plot galleries without changing the scientific source tables.
 
 Required sections are:
 
@@ -969,12 +969,12 @@ Avoid exposing implementation-only toggles. Advanced settings that are rarely sa
 - [ ] Track generation performs no redundant BAM strand extraction per normalization.
 - [ ] APA-B installation is pinned and reproducible, or remains explicitly disabled with an actionable pilot guide.
 - [ ] APA-A is unchanged by enabling/disabling APA-B.
-- [ ] DGE enrichment separates up/down ORA and uses Wald-statistic ranked GSEA with the correct tested C4 background.
-- [ ] APA enrichment separates proximal/distal and increased/decreased PCPA using the correct testable-gene background.
-- [ ] Enrichment identifier mapping and gene-set database provenance are recorded.
+- [x] DGE enrichment separates up/down ORA and uses Wald-statistic ranked GSEA with the correct tested C4 background.
+- [x] APA enrichment separates proximal/distal and increased/decreased PCPA using the correct testable-gene background.
+- [x] Enrichment identifier mapping and gene-set database provenance are recorded.
 - [ ] The documentation has a numbered index and a beginner-tested quick start.
 - [ ] Every documented command was tested in a clean shell.
-- [ ] One final HTML report includes QC funnels, every DGE/APA variant, enrichment, track links, provenance, and warnings.
+- [x] One final HTML report includes QC funnels, every DGE/APA variant, enrichment, track links, provenance, and warnings.
 - [ ] The report's sortable contrast table agrees exactly with all source indexes.
 - [ ] Cleanup remains enabled by default, success-only, receipt-gated, and auditable.
 - [ ] Shared installation remains immutable and usable by all server users.

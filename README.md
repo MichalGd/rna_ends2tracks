@@ -48,8 +48,9 @@ flowchart TD
     C2R --> TRACKS
     C3 --> TRACKS
     SF --> TRACKS
-    DGE --> REPORT[HTML/Markdown/TSV report]
-    APA --> REPORT
+    DGE --> ENRICH[DGE and APA enrichment]
+    APA --> ENRICH
+    ENRICH --> REPORT[HTML/Markdown/TSV scientific report]
     TRACKS --> REPORT
     REPORT --> CLEAN[Success-only cleanup]
 ```
@@ -175,7 +176,7 @@ results/
 
 `CLEANUP_INTERMEDIATES=true` is the default. Cleanup runs only after all enabled deliverable receipts and the report validate. It removes only an explicit allow-list (trimmed FASTQs, lane/all-alignment BAMs, temporary strand BAMs and bedGraphs), writes `provenance/cleanup/cleanup_manifest.tsv`, and preserves final BAMs, count universes, statistics, BigWigs, reports and provenance.
 
-`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; optional APA-B results; and APA-A/APA-B direction concordance. It also lists validated samples, all BigWig collections, the main QC/result indexes, and browser assets. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC remains the detailed sequencing/alignment QC report; enrichment and APA-B sections appear only when those modules produce validated inputs.
+`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; optional validated APA-B results; and APA-A/APA-B direction concordance. It embeds PCA, sample-distance, MA, volcano, and enrichment plots; lists validated samples and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC remains the detailed sequencing/alignment QC report. See [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
 
 Every report run also creates `10_reports/bigwig_collections.txt`, a one-column list grouped by track folder, and `10_reports/ucsc_track_descriptors/`, containing one descriptor file per collection plus `UCSC_bigWig_tracks.oneline.txt`. Each BigWig uses one valid UCSC custom-track line, collection-specific color, and optional `negateValues=on` for transcript-minus tracks. Set `UCSC_BIGDATA_URL_PREFIX` to the public directory containing a flat copy of the BigWigs; do not use Markdown link syntax in `config.conf`.
 
@@ -191,4 +192,4 @@ See [server installation](docs/server_installation.md) and [recovery/troubleshoo
 
 ## APA-B status
 
-APA-B remains disabled and pilot-gated. Enabling it requires an independently installed, pinned adapter command plus explicit `APA_B_PILOT_ACCEPTED=true`. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output.
+APA-B remains disabled until a real pilot is accepted. Enabling it requires an independently installed pinned adapter, `APA_B_PILOT_ACCEPTED=true`, and a schema-v1 `APA_B_VALIDATION_MANIFEST` whose engine/model/environment identities and human/mouse canaries match the run-specific engine provenance. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output. An unvalidated run is labelled `DISABLED_NOT_VALIDATED`, not interpreted.

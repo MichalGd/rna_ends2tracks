@@ -52,6 +52,7 @@ for (i in seq_len(nrow(contrasts))) {
   if (length(condition_coef) != 1) stop(paste("Cannot identify one pairwise condition coefficient:", con$contrast_id))
   d <- dmPrecision(d, design=design); d <- dmFit(d, design=design); d <- dmTest(d, coef=condition_coef)
   gene_result <- DRIMSeq::results(d, level="gene"); feature_result <- DRIMSeq::results(d, level="feature")
+  gene_result$gene_padj <- p.adjust(gene_result$pvalue, method="BH")
   p_screen <- gene_result$pvalue; names(p_screen) <- gene_result$gene_id
   p_confirmation <- matrix(feature_result$pvalue, ncol=1,
                            dimnames=list(feature_result$feature_id, "site"))
@@ -73,11 +74,35 @@ for (i in seq_len(nrow(contrasts))) {
   positions <- catalog$start[match(feature_result$feature_id, catalog$pas_id)]
   result_genes <- feature_result$gene_id
   feature_result$weighted_genomic_position_shift_nt <- ave(feature_result$PAU_numerator * positions, result_genes, FUN=sum) - ave(feature_result$PAU_denominator * positions, result_genes, FUN=sum)
+  feature_strands <- catalog$strand[match(feature_result$feature_id, catalog$pas_id)]
+  feature_result$weighted_transcript_position_shift_nt <- feature_result$weighted_genomic_position_shift_nt * ifelse(feature_strands == "+", 1, -1)
+  finite_max <- function(values) {
+    values <- values[is.finite(values)]
+    if (length(values)) max(values) else NA_real_
+  }
+  gene_summary <- do.call(rbind, lapply(split(feature_result, feature_result$gene_id), function(rows) {
+    gene_id <- as.character(rows$gene_id[1])
+    gene_padj <- gene_result$gene_padj[match(gene_id, gene_result$gene_id)]
+    shift_nt <- rows$weighted_transcript_position_shift_nt[1]
+    data.frame(
+      gene_id=gene_id, gene_padj=gene_padj, testable_sites=nrow(rows),
+      confirmed_sites=sum(!is.na(rows$stageR_adjusted) & rows$stageR_adjusted < alpha),
+      max_abs_delta_PAU=finite_max(abs(rows$delta_PAU)),
+      weighted_transcript_position_shift_nt=shift_nt,
+      shift=ifelse(is.na(shift_nt) || shift_nt == 0, "no_directional_change", ifelse(shift_nt > 0, "distal", "proximal")),
+      signed_shift_score=ifelse(is.na(gene_padj), NA_real_, sign(shift_nt) * -log10(max(gene_padj, .Machine$double.xmin))),
+      stringsAsFactors=FALSE
+    )
+  }))
   target <- file.path(outdir, paste0(con$contrast_id, ".drimseq_stager.tsv"))
+  gene_target <- file.path(outdir, paste0(con$contrast_id, ".gene_apa_summary.tsv"))
   write.table(feature_result, target, sep="\t", quote=FALSE, row.names=FALSE)
-  write.table(gene_result, file.path(outdir, paste0(con$contrast_id, ".gene_screen.tsv")), sep="\t", quote=FALSE, row.names=FALSE)
+  gene_screen_target <- file.path(outdir, paste0(con$contrast_id, ".gene_screen.tsv"))
+  write.table(gene_result, gene_screen_target, sep="\t", quote=FALSE, row.names=FALSE)
+  write.table(gene_summary, gene_target, sep="\t", quote=FALSE, row.names=FALSE)
   index[[length(index)+1]] <- data.frame(
     contrast_id=con$contrast_id, result_file=target, tested_sites=nrow(feature_result),
+    gene_screen_file=gene_screen_target, gene_summary_file=gene_target,
     confirmed_sites=sum(!is.na(feature_result$stageR_adjusted) & feature_result$stageR_adjusted < alpha),
     design_mode=if ("design_mode" %in% colnames(contrasts)) con$design_mode else "legacy",
     resolved_design=design_text,

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add embedded C4 PCA and sample-distance figures plus per-contrast MA and volcano plots in PDF/PNG.
+- Add bounded, receipt-backed DGE/APA-A/PCPA and validated APA-B ORA/GSEA using GO, Reactome, and Hallmark gene sets with mapping/database provenance.
+- Add a complete provenance dashboard covering configuration and samplesheet checksums, references/PAS atlases, stage receipts, environment packages, executable versions, and all output files.
+- Require an accepted APA-B validation manifest and matching run-specific engine provenance before producing or interpreting APA-B results.
+
 - Run CPU-bound per-sample exact-end extraction and mixed Python/native track generation in bounded process pools so configured parallel jobs can use multiple CPU cores.
 - Add an internal chronological master log, atomic run-status snapshot, and `rna-ends2tracks status` command.
 - Record native-command and stage lifecycle events while retaining detailed per-tool logs.
