@@ -4,10 +4,41 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rnaends2tracks.config import RunPlan
-from rnaends2tracks.tracks import _sample_tracks_subset, make_c0_tracks, make_tracks
+from rnaends2tracks.tracks import (
+    _sample_tracks_subset,
+    make_c0_tracks,
+    make_c0_tracks_for_sample,
+    make_tracks,
+)
 
 
 class EarlyTrackTests(unittest.TestCase):
+    def test_sample_ready_c0_tracks_use_only_raw_and_cpm(self):
+        sample = {"sample_id": "S1", "genome": "GRCm39"}
+        reference = {"assembly": "GRCm39", "chrom_sizes": "chrom.sizes"}
+        project = {
+            "modules": {"tracks": True},
+            "tracks": {
+                "early_c0": True,
+                "families": {"all_reads": True},
+                "normalizations": {
+                    "raw": True, "cpm": True, "deseq2": True, "robust_cpm": True,
+                },
+                "generate_bigwigs": False,
+            },
+        }
+        plan = RunPlan(project, [sample], [], [], reference, {"GRCm39": reference})
+
+        with (
+            patch("rnaends2tracks.tracks.require_tools"),
+            patch("rnaends2tracks.tracks._sample_tracks_subset", return_value=([], [])) as subset,
+        ):
+            make_c0_tracks_for_sample(plan, Path("results"), sample)
+
+        self.assertEqual(subset.call_args.args[4], ("all_reads",))
+        self.assertEqual(subset.call_args.args[5], ("raw", "cpm"))
+        self.assertEqual(subset.call_args.args[6], "tracks_c0")
+
     def test_final_track_stage_reuses_early_c0_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             results = Path(temporary) / "results"

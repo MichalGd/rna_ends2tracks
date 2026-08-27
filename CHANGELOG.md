@@ -8,6 +8,7 @@
 - Explain the workflow-specific C0-C5 count universes in a beginner-facing data-stage guide.
 - Split early C0 raw/CPM tracks from end-derived tracks with independent receipts and one strand-BAM extraction per sample/strand.
 - Report completed/total work, elapsed time, and approximate ETA for bounded lane, sample, track, and contrast pools in the chronological master log.
+- Start raw/CPM C0 tracks as each final sample BAM is published during merging, using only CPU/RAM capacity left after reserving the configured merge pool; defer automatically when no safe overlap capacity remains.
 
 ## 0.1.0-alpha.9.post2 - 2026-08-27
 

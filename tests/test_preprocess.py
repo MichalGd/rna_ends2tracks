@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rnaends2tracks.config import RunPlan
-from rnaends2tracks.preprocess import _remove_owned_temporary_tree, preprocess
+from rnaends2tracks.preprocess import _c0_overlap_workers, _remove_owned_temporary_tree, preprocess
 
 
 class PreprocessOrderTests(unittest.TestCase):
@@ -79,11 +79,14 @@ class PreprocessOrderTests(unittest.TestCase):
                 elif command[:2] == ["samtools", "index"]:
                     Path(command[command.index("-o") + 1]).write_bytes(b"index")
 
-            def immediate(stage, jobs, workers, _timing, progress=None):
+            def immediate(stage, jobs, workers, _timing, progress=None, on_completed=None):
                 phases.append((stage, workers))
                 values = []
                 for label, worker in jobs:
-                    values.append(worker())
+                    value = worker()
+                    values.append(value)
+                    if on_completed is not None:
+                        on_completed(label, value)
                     if progress is not None:
                         progress(label, "completed")
                 return values
@@ -116,6 +119,31 @@ class PreprocessOrderTests(unittest.TestCase):
                 Path(environments[multiqc_index]["TMPDIR"]).name).exists())
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam").is_file())
             self.assertTrue((results / "02_alignment" / "S1" / "S1.bam.bai").is_file())
+
+    def test_c0_overlap_workers_respect_combined_cpu_and_memory_budgets(self):
+        samples = [
+            {"sample_id": "S1", "genome": "GRCm39"},
+            {"sample_id": "S2", "genome": "GRCm39"},
+        ]
+        resources = {
+            "total_threads": 16,
+            "total_memory_gb": 32,
+            "preprocess": {
+                "merge_parallel_jobs": 2, "samtools_threads": 2, "merge_memory_gb": 4,
+            },
+            "tracks": {"parallel_jobs": 4, "samtools_threads": 2, "memory_gb": 4},
+        }
+        project = {
+            "modules": {"tracks": True},
+            "resources": resources,
+            "tracks": {"early_c0": True, "families": {"all_reads": True}},
+        }
+        reference = {"assembly": "GRCm39"}
+        plan = RunPlan(project, samples, [], [], reference, {"GRCm39": reference})
+
+        self.assertEqual(_c0_overlap_workers(plan), 2)
+        resources["total_threads"] = 4
+        self.assertEqual(_c0_overlap_workers(plan), 0)
 
 
 if __name__ == "__main__":

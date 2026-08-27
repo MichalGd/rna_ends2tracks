@@ -139,6 +139,8 @@ The resolved maximum CPU/RAM for each pool is written before analysis. Outputs a
 
 Alpha.10 distinguishes executor types in `00_metadata/resource_plan.tsv`: external tools remain in bounded thread-managed subprocess pools, while CPU-bound Python exact-end workers use separate processes so `END_EXTRACTION_PARALLEL_JOBS` corresponds to usable CPU concurrency.
 
+Raw/CPM C0 track workers may overlap the sample-merge phase. The dispatcher first reserves the configured maximum merge CPU and RAM, then starts only the number of track workers that fit inside the remaining global ceilings. A zero-worker result is safe: track publication is deferred automatically to the dedicated `c0_tracks` stage. The current alpha.10 checkpoint does not overlap tracks with STAR itself.
+
 ## Track families
 
 | Family | Universe | Raw | CPM | DESeq2 | Robust CPM |

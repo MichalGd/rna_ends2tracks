@@ -326,15 +326,39 @@ def _run_track_subset(
     )
 
 
+def c0_tracks_enabled(plan: RunPlan) -> bool:
+    settings = plan.project.get("tracks", {})
+    return bool(
+        plan.project.get("modules", {}).get("tracks", True)
+        and settings.get("early_c0", True)
+        and settings.get("families", {}).get("all_reads", False)
+    )
+
+
+def make_c0_tracks_for_sample(
+    plan: RunPlan, results: Path, sample: dict[str, str], force: bool = False,
+) -> tuple[list[Path], list[dict[str, Any]]]:
+    """Publish one sample's C0 tracks after its final BAM becomes available."""
+    if not c0_tracks_enabled(plan):
+        return [], []
+    settings = plan.project["tracks"]
+    required = ["samtools", "bedtools"]
+    if settings["generate_bigwigs"]:
+        required.append("bedGraphToBigWig")
+    require_tools(required)
+    normalizations = tuple(
+        key for key in ("raw", "cpm") if settings["normalizations"].get(key, False)
+    )
+    return _sample_tracks_subset(
+        plan, results, sample, force, ("all_reads",), normalizations, "tracks_c0"
+    )
+
+
 def make_c0_tracks(plan: RunPlan, results: Path, dry_run: bool = False, force: bool = False) -> None:
     """Publish all-read raw/CPM tracks immediately after final C0 BAM creation."""
     settings = plan.project["tracks"]
     logdir = results / "logs"
-    enabled = bool(
-        plan.project.get("modules", {}).get("tracks", True)
-        and settings.get("early_c0", True)
-        and settings["families"].get("all_reads", False)
-    )
+    enabled = c0_tracks_enabled(plan)
     if not enabled:
         event(logdir, "c0_tracks", "disabled", "Early C0 track generation is disabled")
         return

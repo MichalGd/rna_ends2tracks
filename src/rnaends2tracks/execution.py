@@ -208,6 +208,7 @@ def run_bounded(
     max_workers: int,
     timing_dir: Path,
     progress: Callable[[str, str], None] | None = None,
+    on_completed: Callable[[str, T], None] | None = None,
 ) -> list[T]:
     """Run independent jobs in a bounded pool and return results in input order."""
     if not jobs:
@@ -249,6 +250,8 @@ def run_bounded(
             try:
                 returned_index, value = future.result()
                 results[returned_index] = value
+                if on_completed is not None:
+                    on_completed(label, value)
                 if progress is not None:
                     progress(label, "completed")
             except Exception as exc:  # noqa: BLE001 - aggregate independent worker failures

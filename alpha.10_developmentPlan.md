@@ -289,6 +289,8 @@ Implement two track phases:
 
 The normal output layout may remain under `09_tracks/`, but receipts should distinguish `tracks_c0` and `tracks_ends`. The report and cleanup code must accept the split receipts.
 
+Implementation checkpoint: alpha.10 now submits a sample's raw/CPM C0 tracks when that sample's final BAM completes during the merge phase. The overlap worker count is derived from CPU and RAM remaining after reserving the full configured merge pool; a zero-worker calculation defers safely to the dedicated resumable stage. This is an incremental checkpoint. Starting tracks while unrelated samples are still in STAR requires the later dependency-aware dispatcher and remains open.
+
 Acceptance criteria:
 
 - the first sample's C0 raw/CPM BigWigs can appear while other samples are still aligning;

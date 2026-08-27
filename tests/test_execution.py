@@ -54,6 +54,7 @@ class ProcessExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             returned = []
             progress = []
+            completed = []
             jobs = [
                 ("one", partial(append_value, returned, 1)),
                 ("two", partial(append_value, returned, 2)),
@@ -62,10 +63,12 @@ class ProcessExecutionTests(unittest.TestCase):
                 run_bounded(
                     "threads", jobs, 2, Path(temporary),
                     progress=lambda label, status: progress.append((label, status)),
+                    on_completed=lambda label, value: completed.append((label, value)),
                 ),
                 [1, 2],
             )
             self.assertEqual(set(progress), {("one", "completed"), ("two", "completed")})
+            self.assertEqual(set(completed), {("one", 1), ("two", 2)})
 
 
 if __name__ == "__main__":
