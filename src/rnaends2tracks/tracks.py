@@ -3,13 +3,12 @@ from __future__ import annotations
 import csv
 import gzip
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from .config import RunPlan, signature_for
-from .execution import run_bounded
-from .external import event, require_tools, run
+from .execution import run_bounded_processes
+from .external import event, require_tools, run, run_capture, run_to_path
 from .paths import workflow_asset
 from .receipts import receipt_valid, write_receipt
 
@@ -80,13 +79,8 @@ def _size_factors(path: Path) -> dict[str, dict[str, float]]:
 
 
 def _bam_count(bam: Path, log: Path, threads: int) -> int:
-    completed = subprocess.run(
-        ["samtools", "view", "-@", str(threads), "-c", str(bam)], check=True,
-        capture_output=True, text=True,
-    )
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text(completed.stderr, encoding="utf-8")
-    return int(completed.stdout.strip())
+    stdout = run_capture(["samtools", "view", "-@", str(threads), "-c", str(bam)], log)
+    return int(stdout.strip())
 
 
 def _all_read_bedgraph(bam: Path, strand: str, output: Path, scale: float, threads: int, log: Path) -> Path:
@@ -94,11 +88,10 @@ def _all_read_bedgraph(bam: Path, strand: str, output: Path, scale: float, threa
     flag_args = ["-f", "16"] if strand == "plus" else ["-F", "16"]
     run(["samtools", "view", "-@", str(threads), "-b", *flag_args, "-o", str(strand_bam), str(bam)], log, False)
     positive = output if strand == "plus" else output.with_suffix(".positive.bedGraph")
-    with positive.open("w", encoding="utf-8") as handle:
-        subprocess.run(
-            ["bedtools", "genomecov", "-ibam", str(strand_bam), "-bg", "-scale", f"{scale:.15g}"],
-            stdout=handle, stderr=subprocess.PIPE, check=True, text=True,
-        )
+    run_to_path(
+        ["bedtools", "genomecov", "-ibam", str(strand_bam), "-bg", "-scale", f"{scale:.15g}"],
+        positive, log,
+    )
     if strand == "minus":
         _negated(positive, output)
     return strand_bam
@@ -287,10 +280,14 @@ def make_tracks(plan: RunPlan, results: Path, dry_run: bool = False, force: bool
                     "C4_track_size_factors", factor_receipt, factor_signature, [factor_path],
                     ["rna-ends2tracks", "C4_track_size_factors", genome],
                 )
-    jobs = [(sample["sample_id"], lambda sample=sample: _sample_tracks(plan, results, sample, force)) for sample in plan.samples]
-    completed = run_bounded(
+    jobs = [
+        (sample["sample_id"], _sample_tracks, (plan, results, sample, force))
+        for sample in plan.samples
+    ]
+    completed = run_bounded_processes(
         "tracks", jobs, plan.project["resources"]["tracks"]["parallel_jobs"],
         results / ".checkpoints" / "timings" / "tracks",
+        progress=lambda label, status: event(logdir, "tracks", status, f"Sample worker {label} {status}"),
     )
     expected = [path for paths, _ in completed for path in paths]
     if needs_final_factors:

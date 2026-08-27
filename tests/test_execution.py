@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rnaends2tracks.execution import run_bounded_processes
+from rnaends2tracks.execution import DEFAULT_RESOURCES, resource_plan_rows, run_bounded_processes
 
 
 def process_identity(value):
@@ -15,6 +15,13 @@ def process_failure():
 
 
 class ProcessExecutionTests(unittest.TestCase):
+    def test_resource_plan_declares_exact_end_process_executor(self):
+        rows = resource_plan_rows(DEFAULT_RESOURCES, {"samples": 4})
+        exact = next(row for row in rows if row["work_unit"] == "exact_end_extraction")
+        self.assertEqual(exact["executor"], "python_process")
+        tracks = next(row for row in rows if row["stage"] == "tracks")
+        self.assertEqual(tracks["executor"], "python_process_and_external_process")
+
     def test_process_pool_preserves_order_and_records_worker_pids(self):
         with tempfile.TemporaryDirectory() as temporary:
             timing = Path(temporary)

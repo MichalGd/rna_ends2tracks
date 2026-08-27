@@ -6,11 +6,53 @@ import shlex
 import shutil
 import subprocess
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import BinaryIO, Iterator
 
 
 _EVENT_LOCK = threading.Lock()
+
+
+def _lock_file(handle: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(handle: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _event_file_lock(results: Path) -> Iterator[None]:
+    path = results / ".checkpoints" / "event.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        _lock_file(handle)
+        try:
+            yield
+        finally:
+            _unlock_file(handle)
 
 
 def _results_root(log_dir: Path) -> Path:
@@ -107,6 +149,64 @@ def run(
         event(workflow_logs, module, "completed", f"{label}: exit_status=0; details={log_path}")
 
 
+def run_capture(
+    command: list[str], log_path: Path, cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> str:
+    """Run a command, return stdout, and retain stderr plus lifecycle records."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    display = shlex.join(command)
+    workflow_logs, module, label = _command_context(log_path)
+    if workflow_logs is not None:
+        event(workflow_logs, module, "started", f"{label}: {display}; details={log_path}")
+    environment = None if env is None else {**os.environ, **env}
+    try:
+        completed = subprocess.run(
+            command, cwd=cwd, env=environment, capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        log_path.write_text(
+            f"COMMAND: {display}\n{exc.stderr or ''}", encoding="utf-8"
+        )
+        if workflow_logs is not None:
+            event(workflow_logs, module, "failed",
+                  f"{label}: exit_status={exc.returncode}; details={log_path}")
+        raise
+    log_path.write_text(f"COMMAND: {display}\n{completed.stderr}", encoding="utf-8")
+    if workflow_logs is not None:
+        event(workflow_logs, module, "completed", f"{label}: exit_status=0; details={log_path}")
+    return completed.stdout
+
+
+def run_to_path(
+    command: list[str], output_path: Path, log_path: Path, cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
+    """Run a command with stdout directed to a data file and stderr to its log."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    display = shlex.join(command)
+    workflow_logs, module, label = _command_context(log_path)
+    if workflow_logs is not None:
+        event(workflow_logs, module, "started", f"{label}: {display}; details={log_path}")
+    environment = None if env is None else {**os.environ, **env}
+    try:
+        with output_path.open("w", encoding="utf-8") as output, log_path.open("a", encoding="utf-8") as log:
+            log.write("COMMAND: " + display + "\n")
+            log.flush()
+            subprocess.run(
+                command, cwd=cwd, env=environment, stdout=output,
+                stderr=log, text=True, check=True,
+            )
+    except subprocess.CalledProcessError as exc:
+        if workflow_logs is not None:
+            event(workflow_logs, module, "failed",
+                  f"{label}: exit_status={exc.returncode}; details={log_path}")
+        raise
+    if workflow_logs is not None:
+        event(workflow_logs, module, "completed", f"{label}: exit_status=0; details={log_path}")
+
+
 def event(log_dir: Path, module: str, status: str, message: str) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -122,7 +222,7 @@ def event(log_dir: Path, module: str, status: str, message: str) -> None:
         f"{payload['time']} {severity} [{module}] {status.upper()} "
         f"{message} (pid={payload['pid']})\n"
     )
-    with _EVENT_LOCK:
+    with _EVENT_LOCK, _event_file_lock(results):
         with (log_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, sort_keys=True) + "\n")
         with (results / "rna_ends2tracks.log").open("a", encoding="utf-8") as handle:

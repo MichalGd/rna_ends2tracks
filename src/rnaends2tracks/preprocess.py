@@ -5,7 +5,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import tempfile
 from collections import defaultdict
 from pathlib import Path
@@ -13,7 +12,7 @@ from typing import Any
 
 from .config import RunPlan, signature_for
 from .execution import run_bounded
-from .external import event, require_tools, run
+from .external import event, require_tools, run, run_to_path
 from .paths import workflow_asset
 from .receipts import receipt_valid, write_receipt
 
@@ -267,10 +266,11 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             if not dry_run:
                 temporary_index.replace(sample_bam.with_suffix(".bam.bai"))
                 temporary_flagstat = sample_dir / ".flagstat.tsv.tmp"
-                with temporary_flagstat.open("w", encoding="utf-8") as output:
-                    subprocess.run(["samtools", "flagstat", "-@", str(resource["samtools_threads"]), "-O", "tsv",
-                                    str(sample_bam)], stdout=output, stderr=subprocess.STDOUT, check=True, text=True,
-                                   env=None if tool_env is None else {**os.environ, **tool_env})
+                run_to_path(
+                    ["samtools", "flagstat", "-@", str(resource["samtools_threads"]), "-O", "tsv",
+                     str(sample_bam)],
+                    temporary_flagstat, sample_log, env=tool_env,
+                )
                 temporary_flagstat.replace(flagstat)
                 write_receipt("preprocess_merge", receipt_dir, sample_signature,
                               [sample_bam, sample_bam.with_suffix(".bam.bai"), flagstat],

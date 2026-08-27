@@ -1,5 +1,18 @@
 # Recovery and troubleshooting
 
+## See what the workflow is doing
+
+The authoritative human-readable progress log is `OUTPUT_DIR/rna_ends2tracks.log`:
+
+```bash
+tail -F /path/to/OUTPUT_DIR/rna_ends2tracks.log
+rna-ends2tracks status /path/to/project/config/config.conf
+```
+
+The status command can also receive `OUTPUT_DIR` directly. Add `--json` for the complete machine-readable snapshot. The master log reports stages and native-command outcomes in chronological order and points to the detailed log for each native tool. `logs/events.jsonl` remains available for programmatic parsing.
+
+If the status is `failed`, the last message identifies the failed stage. Read the referenced detailed log before using `--force-step`; a normal rerun is sufficient when valid receipts already exist.
+
 ## Safe restart
 
 Re-run the same command. Matching module, sample and contrast receipts skip complete outputs. Use `--from-step STEP` to avoid scanning earlier stages or `--force-step STEP` after deliberately changing/rebuilding that stage. A changed sample set must use a new output directory because it defines a new condition-blind PAS universe.

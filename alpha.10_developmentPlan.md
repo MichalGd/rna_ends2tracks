@@ -1,8 +1,8 @@
 # rna_ends2tracks alpha.10 development plan
 
-**Status:** implementation started on `feature/alpha10-development`; server alpha.9 remains untouched  
-**Prepared:** 2026-08-27  
-**Baseline:** `v0.1.0-alpha.9` (`0.1.0a9`)  
+**Status:** implementation started on `feature/alpha10-development`; server alpha.9 remains untouched
+**Prepared:** 2026-08-27
+**Baseline:** `v0.1.0-alpha.9` (`0.1.0a9`)
 **Primary interface:** one `config.conf` plus one `samplesheet.csv`
 
 ### Implementation checkpoint: 2026-08-27
@@ -12,8 +12,9 @@ The first laptop-only development slice is in progress and does not alter the ac
 - a chronological `OUTPUT_DIR/rna_ends2tracks.log` and atomic `00_metadata/run_status.json`;
 - `rna-ends2tracks status CONFIG_OR_OUTPUT_DIR`;
 - stage and native-command lifecycle messages with links to detailed logs;
-- a process-based scheduler for CPU-bound per-sample exact-end extraction;
+- a process-based scheduler for CPU-bound per-sample exact-end extraction and mixed Python/native track generation;
 - parent-process progress events and per-worker timing/PID records;
+- cross-process-safe event, master-log, and atomic status updates;
 - a beginner-facing C0-C5 data-stage glossary.
 
 These items remain development changes until the complete regression suite and Linux integration checks pass. No stable launcher, installed environment, PAS atlas, active project configuration, or current output directory is modified by this work.

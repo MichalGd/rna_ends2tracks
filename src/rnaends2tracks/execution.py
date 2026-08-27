@@ -165,7 +165,7 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
          apa_b["engine_threads"], apa_b["engine_memory_gb"]),
         ("apa_b", "contrast", "external_process", counts.get("contrasts", 0), apa_b["contrast_parallel_jobs"],
          apa_b["contrast_threads"], apa_b["contrast_memory_gb"]),
-        ("tracks", "sample", "mixed", counts.get("samples", 0), tracks["parallel_jobs"],
+        ("tracks", "sample", "python_process_and_external_process", counts.get("samples", 0), tracks["parallel_jobs"],
          tracks["samtools_threads"], tracks["memory_gb"]),
     ]
     rows: list[dict[str, Any]] = []
