@@ -60,7 +60,7 @@ class UnifiedLoggingTests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(show_status(results), 0)
             self.assertIn("Workflow status: completed", output.getvalue())
-            self.assertIn(str(results / "rna_ends2tracks.log"), output.getvalue())
+            self.assertIn(str((results / "rna_ends2tracks.log").resolve()), output.getvalue())
 
     def test_event_updates_are_process_safe(self):
         from rnaends2tracks.execution import run_bounded_processes

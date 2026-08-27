@@ -82,12 +82,16 @@ class PreprocessOrderTests(unittest.TestCase):
             def immediate(stage, jobs, workers, _timing):
                 phases.append((stage, workers)); return [worker() for _, worker in jobs]
 
+            def fake_run_to_path(_command, output, _log, dry_run=False, cwd=None, env=None):
+                self.assertFalse(dry_run)
+                Path(output).write_text("flagstat\n", encoding="utf-8")
+
             with (patch("rnaends2tracks.preprocess.require_tools"),
                   patch("rnaends2tracks.preprocess.run", side_effect=fake_run),
+                  patch("rnaends2tracks.preprocess.run_to_path", side_effect=fake_run_to_path),
                   patch("rnaends2tracks.preprocess.run_bounded", side_effect=immediate),
                   patch("rnaends2tracks.preprocess.write_receipt"),
-                  patch("rnaends2tracks.preprocess.signature_for", return_value="signature"),
-                  patch("rnaends2tracks.preprocess.subprocess.run")):
+                  patch("rnaends2tracks.preprocess.signature_for", return_value="signature")):
                 preprocess(plan, results)
 
             self.assertEqual(phases[:2], [("qc_and_trim", 2), ("star_and_sort", 1)])
