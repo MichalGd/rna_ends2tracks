@@ -66,7 +66,7 @@ flowchart TD
 - Intragenic intronic and non-terminal-exonic PAS are retained as candidate premature cleavage/polyadenylation events.
 - C4 active-PAS gene sums are primary DGE. C5 featureCounts values are diagnostic only.
 
-See [methods](docs/methods.md), [PAS atlases](docs/pas_atlases.md), and [limitations](docs/limitations.md).
+The `C` labels mean workflow-specific **count universes**, not standard RNA-seq terms. C1S and C2R are side branches, while C5 is an independent diagnostic. See [C0-C5 data stages](docs/data_stages.md), [methods](docs/methods.md), [PAS atlases](docs/pas_atlases.md), and [limitations](docs/limitations.md).
 
 ## Quick start
 
@@ -83,8 +83,17 @@ rna-ends2tracks --stop-after validate config/config.conf
 6. Run:
 
 ```bash
-rna-ends2tracks config/config.conf 2>&1 | tee rna_ends2tracks.log
+rna-ends2tracks config/config.conf
 ```
+
+The workflow writes one chronological master log inside the configured `OUTPUT_DIR`. Monitor it or request a concise snapshot from another shell:
+
+```bash
+tail -F /path/to/OUTPUT_DIR/rna_ends2tracks.log
+rna-ends2tracks status config/config.conf
+```
+
+Detailed native-tool output remains under `OUTPUT_DIR/logs/`, and the latest machine-readable state is `OUTPUT_DIR/00_metadata/run_status.json`.
 
 Useful controls:
 
@@ -124,6 +133,8 @@ Required columns include:
 
 The resolved maximum CPU/RAM for each pool is written before analysis. Outputs and timing fragments are deterministic even when jobs finish out of order.
 
+Alpha.10 distinguishes executor types in `00_metadata/resource_plan.tsv`: external tools remain in bounded thread-managed subprocess pools, while CPU-bound Python exact-end workers use separate processes so `END_EXTRACTION_PARALLEL_JOBS` corresponds to usable CPU concurrency.
+
 ## Track families
 
 | Family | Universe | Raw | CPM | DESeq2 | Robust CPM |
@@ -140,6 +151,7 @@ Transcript-plus and transcript-minus BigWigs are separate; minus values are nega
 
 ```text
 results/
+├── rna_ends2tracks.log        chronological stages and job outcomes
 ├── 00_metadata/
 ├── 01_qc/
 ├── 02_alignment/              C0 BAMs and orientation audit

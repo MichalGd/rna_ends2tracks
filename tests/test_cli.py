@@ -46,6 +46,11 @@ class CliTests(unittest.TestCase):
             events = (root / "results" / "logs" / "events.jsonl").read_text(encoding="utf-8")
             self.assertIn('"module": "preprocess"', events)
             self.assertIn('"status": "dry_run"', events)
+            master = (root / "results" / "rna_ends2tracks.log").read_text(encoding="utf-8")
+            self.assertIn("[workflow] STARTED", master)
+            self.assertIn("[workflow] COMPLETED Dry run completed", master)
+            status = (root / "results" / "00_metadata" / "run_status.json").read_text(encoding="utf-8")
+            self.assertIn('"workflow_status": "completed"', status)
 
 
 if __name__ == "__main__":

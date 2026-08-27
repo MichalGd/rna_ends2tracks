@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, TypeVar
 
 T = TypeVar("T")
+ProcessJob = tuple[str, Callable[..., T], tuple[Any, ...]]
 
 
 DEFAULT_RESOURCES: dict[str, Any] = {
@@ -142,35 +144,39 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
     apa_b = resources["apa_b"]
     tracks = resources["tracks"]
     definitions = [
-        ("preprocess", "qc_and_trim", counts.get("lanes", 0), pre["trim_parallel_jobs"],
+        ("preprocess", "qc_and_trim", "external_process", counts.get("lanes", 0), pre["trim_parallel_jobs"],
          max(pre["fastqc_threads"], pre["bbduk_threads"]), pre["bbduk_memory_gb"]),
-        ("preprocess", "star_and_sort", counts.get("lanes", 0), pre["star_parallel_jobs"],
+        ("preprocess", "star_and_sort", "external_process", counts.get("lanes", 0), pre["star_parallel_jobs"],
          max(pre["star_threads"], pre["samtools_threads"]),
          max(pre["star_memory_gb"],
              pre["samtools_threads"] * pre["samtools_sort_memory_per_thread_gb"])),
-        ("preprocess", "sample_merge", counts.get("samples", 0), pre["merge_parallel_jobs"],
+        ("preprocess", "sample_merge", "external_process", counts.get("samples", 0), pre["merge_parallel_jobs"],
          pre["samtools_threads"], pre["merge_memory_gb"]),
-        ("dge", "featurecounts", 1, 1, dge["featurecounts_threads"], dge["featurecounts_memory_gb"]),
-        ("dge", "contrast", counts.get("contrasts", 0), dge["contrast_parallel_jobs"],
+        ("dge", "featurecounts", "external_process", 1, 1,
+         dge["featurecounts_threads"], dge["featurecounts_memory_gb"]),
+        ("dge", "contrast", "external_process", counts.get("contrasts", 0), dge["contrast_parallel_jobs"],
          dge["contrast_threads"], dge["contrast_memory_gb"]),
-        ("apa_a", "exact_end_extraction", counts.get("samples", 0), apa_a["extraction_parallel_jobs"],
+        ("apa_a", "exact_end_extraction", "python_process", counts.get("samples", 0),
+         apa_a["extraction_parallel_jobs"],
          apa_a["extraction_threads"], apa_a["extraction_memory_gb"]),
-        ("apa_a", "contrast", counts.get("contrasts", 0), apa_a["contrast_parallel_jobs"],
+        ("apa_a", "contrast", "external_process", counts.get("contrasts", 0), apa_a["contrast_parallel_jobs"],
          apa_a["contrast_threads"], apa_a["contrast_memory_gb"]),
-        ("apa_b", "engine", 1, 1, apa_b["engine_threads"], apa_b["engine_memory_gb"]),
-        ("apa_b", "contrast", counts.get("contrasts", 0), apa_b["contrast_parallel_jobs"],
+        ("apa_b", "engine", "external_process", 1, 1,
+         apa_b["engine_threads"], apa_b["engine_memory_gb"]),
+        ("apa_b", "contrast", "external_process", counts.get("contrasts", 0), apa_b["contrast_parallel_jobs"],
          apa_b["contrast_threads"], apa_b["contrast_memory_gb"]),
-        ("tracks", "sample", counts.get("samples", 0), tracks["parallel_jobs"],
+        ("tracks", "sample", "mixed", counts.get("samples", 0), tracks["parallel_jobs"],
          tracks["samtools_threads"], tracks["memory_gb"]),
     ]
     rows: list[dict[str, Any]] = []
-    for stage, unit, units, jobs, threads, memory in definitions:
+    for stage, unit, executor, units, jobs, threads, memory in definitions:
         effective_jobs = min(jobs, units) if units else jobs
         max_threads = effective_jobs * threads
         max_memory = effective_jobs * memory
         rows.append({
             "stage": stage,
             "work_unit": unit,
+            "executor": executor,
             "units": units,
             "max_parallel_jobs": jobs,
             "effective_parallel_jobs": effective_jobs,
@@ -242,6 +248,75 @@ def run_bounded(
                 results[returned_index] = value
             except Exception as exc:  # noqa: BLE001 - aggregate independent worker failures
                 failures.append((label, exc))
+    if failures:
+        detail = "; ".join(f"{label}: {exc}" for label, exc in failures)
+        raise RuntimeError(f"{stage} worker failures: {detail}")
+    return [value for value in results]  # type: ignore[misc]
+
+
+def _timed_process(
+    stage: str,
+    index: int,
+    label: str,
+    worker: Callable[..., T],
+    arguments: tuple[Any, ...],
+    timing_dir: Path,
+) -> tuple[int, T]:
+    """Process-pool entry point; all arguments must remain pickleable."""
+    started = time.time()
+    status = "SUCCESS"
+    try:
+        return index, worker(*arguments)
+    except BaseException:
+        status = "FAILED"
+        raise
+    finally:
+        finished = time.time()
+        payload = {
+            "stage": stage,
+            "label": label,
+            "executor": "process",
+            "started_epoch": started,
+            "finished_epoch": finished,
+            "elapsed_seconds": round(finished - started, 6),
+            "status": status,
+            "pid": os.getpid(),
+        }
+        target = timing_dir / f"{label}.json"
+        temporary = timing_dir / f".{label}.{os.getpid()}.json.tmp"
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(target)
+
+
+def run_bounded_processes(
+    stage: str,
+    jobs: list[ProcessJob[T]],
+    max_workers: int,
+    timing_dir: Path,
+    progress: Callable[[str, str], None] | None = None,
+) -> list[T]:
+    """Run CPU-bound independent jobs in processes and preserve input order."""
+    if not jobs:
+        return []
+    timing_dir.mkdir(parents=True, exist_ok=True)
+    results: list[T | None] = [None] * len(jobs)
+    failures: list[tuple[str, Exception]] = []
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_timed_process, stage, index, label, worker, arguments, timing_dir): (index, label)
+            for index, (label, worker, arguments) in enumerate(jobs)
+        }
+        for future in as_completed(futures):
+            _index, label = futures[future]
+            try:
+                returned_index, value = future.result()
+                results[returned_index] = value
+                if progress is not None:
+                    progress(label, "completed")
+            except Exception as exc:  # noqa: BLE001 - aggregate independent worker failures
+                failures.append((label, exc))
+                if progress is not None:
+                    progress(label, "failed")
     if failures:
         detail = "; ".join(f"{label}: {exc}" for label, exc in failures)
         raise RuntimeError(f"{stage} worker failures: {detail}")

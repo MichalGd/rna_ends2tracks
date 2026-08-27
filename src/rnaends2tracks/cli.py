@@ -11,6 +11,7 @@ from .apa_b import apa_b
 from .apa_mcell import active_pas_stage, apa_statistics_stage, exact_ends_stage
 from .cleanup import clean_intermediates
 from .compare import compare_apa
+from .conf import ConfError, project_from_conf
 from .config import (
     ConfigError,
     RunPlan,
@@ -20,7 +21,7 @@ from .config import (
     write_plan,
 )
 from .dge import gene_expression
-from .external import event
+from .external import event, read_run_status
 from .locking import run_lock
 from .paths import workflow_asset
 from .preprocess import preprocess
@@ -49,6 +50,38 @@ def parser() -> argparse.ArgumentParser:
                         help="Metadata-only validation; intended for portable CI examples")
     result.add_argument("config", help="Restricted KEY=value config.conf")
     return result
+
+
+def status_parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        prog="rna-ends2tracks status",
+        description="Show the latest stage and status for a workflow configuration or result directory",
+    )
+    result.add_argument("target", help="config.conf or workflow result directory")
+    result.add_argument("--json", action="store_true", help="Print the complete machine-readable status")
+    return result
+
+
+def show_status(target: str | Path, as_json: bool = False) -> int:
+    path = Path(target).expanduser().resolve()
+    if path.is_file():
+        try:
+            project, _samplesheet = project_from_conf(path)
+        except ConfError as exc:
+            raise ConfigError(str(exc)) from exc
+        results = Path(project["output_dir"]).expanduser().resolve()
+    else:
+        results = path
+    payload = read_run_status(results)
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"Workflow status: {payload.get('workflow_status', 'unknown')}")
+        print(f"Current stage:   {payload.get('current_stage', 'unknown')}")
+        print(f"Last update:     {payload.get('updated_at', 'unknown')}")
+        print(f"Message:         {payload.get('last_message', '')}")
+        print(f"Master log:      {results / 'rna_ends2tracks.log'}")
+    return 0
 
 
 def _normal_step(value: str | None, fallback: str) -> str:
@@ -103,9 +136,11 @@ def execute(args: argparse.Namespace) -> int:
     with run_lock(results):
         metadata = results / "00_metadata"
         write_plan(plan, metadata)
+        event(results / "logs", "workflow", "started", f"Selected stages: {','.join(steps)}")
         event(results / "logs", "validate", "completed",
               f"{len(plan.samples)} samples; {len(plan.contrasts)} within-genome contrasts")
         if steps == ["validate"]:
+            event(results / "logs", "workflow", "completed", "Validation-only run completed")
             print(json.dumps(_summary(plan, results), indent=2))
             return 0
 
@@ -151,16 +186,27 @@ def execute(args: argparse.Namespace) -> int:
             if args.dry_run and step in {"report", "cleanup", "apa_comparison"}:
                 event(results / "logs", step, "dry_run", "Would execute after successful upstream stages")
                 continue
-            actions[step]()
+            event(results / "logs", step, "started", "Stage started")
+            try:
+                actions[step]()
+            except Exception as exc:
+                event(results / "logs", step, "failed", str(exc))
+                event(results / "logs", "workflow", "failed", f"Stopped during {step}: {exc}")
+                raise
+            event(results / "logs", step, "completed", "Stage completed")
+        event(results / "logs", "workflow", "completed",
+              "Dry run completed" if args.dry_run else "All selected stages completed")
     print(json.dumps({**_summary(plan, results), "status": "dry_run" if args.dry_run else "completed",
                       "steps": steps}, indent=2))
     return 0
 
 
 def main() -> None:
-    args = parser().parse_args()
     try:
-        raise SystemExit(execute(args))
+        if len(sys.argv) > 1 and sys.argv[1] == "status":
+            status_args = status_parser().parse_args(sys.argv[2:])
+            raise SystemExit(show_status(status_args.target, status_args.json))
+        raise SystemExit(execute(parser().parse_args()))
     except (ConfigError, RuntimeError, OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(2)

@@ -10,7 +10,7 @@ from typing import Any
 import pysam
 
 from .config import RunPlan, sample_universe, signature_for
-from .execution import run_bounded
+from .execution import run_bounded_processes
 from .external import event, require_tools
 from .mcell2019 import (
     assign_gene,
@@ -173,6 +173,13 @@ def _extract_sample(plan: RunPlan, results: Path, sample: dict[str, str], force:
     return tuple(outputs)  # type: ignore[return-value]
 
 
+def _extract_sample_process(
+    plan: RunPlan, results: Path, sample: dict[str, str], force: bool,
+) -> tuple[Path, Path, Path, Path, Path]:
+    """Pickle-safe process-pool entry point for one biological sample."""
+    return _extract_sample(plan, results, sample, force)
+
+
 def _discover_genome(plan: RunPlan, results: Path, genome: str) -> tuple[list[Path], list[dict[str, Any]]]:
     reference = plan.reference_for(genome)
     samples = [sample for sample in plan.samples if sample["genome"] == genome]
@@ -267,12 +274,18 @@ def exact_ends_stage(plan: RunPlan, results: Path, dry_run: bool = False, force:
         event(log_dir, "exact_ends", "skipped", "Valid project receipt")
     else:
         jobs = [
-            (sample["sample_id"], lambda sample=sample: _extract_sample(plan, results, sample, force))
+            (sample["sample_id"], _extract_sample_process, (plan, results, sample, force))
             for sample in plan.samples
         ]
-        outputs_nested = run_bounded(
+        parallel_jobs = plan.project["resources"]["apa_a"]["extraction_parallel_jobs"]
+        event(log_dir, "exact_ends", "started",
+              f"Launching {len(jobs)} sample workers with process_parallel_jobs={parallel_jobs}")
+        outputs_nested = run_bounded_processes(
             "exact_ends", jobs, plan.project["resources"]["apa_a"]["extraction_parallel_jobs"],
             results / ".checkpoints" / "timings" / "exact_ends",
+            progress=lambda label, status: event(
+                log_dir, "exact_ends", status, f"Sample worker {label} {status}"
+            ),
         )
         outputs = [path for paths in outputs_nested for path in paths]
         write_receipt("exact_ends", exact_root, exact_signature, outputs, ["rna-ends2tracks", "exact_ends"])

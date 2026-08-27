@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Run CPU-bound per-sample exact-end extraction in a bounded process pool so configured parallel jobs can use multiple CPU cores.
+- Add an internal chronological master log, atomic run-status snapshot, and `rna-ends2tracks status` command.
+- Record native-command and stage lifecycle events while retaining detailed per-tool logs.
+- Explain the workflow-specific C0-C5 count universes in a beginner-facing data-stage guide.
+
 ## 0.1.0-alpha.9 - 2026-08-27
 
 - Run MultiQC without its incompatible cleanup inside a workflow-owned temporary directory, then

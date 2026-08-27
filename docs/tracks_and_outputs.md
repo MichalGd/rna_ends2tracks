@@ -2,6 +2,8 @@
 
 All BigWigs are transcript-strand-specific. Transcript-minus values are negative only for display; raw matrices, denominators and statistical calculations remain unsigned.
 
+The C0-C5 labels below are workflow-specific count universes. Read [C0-C5 data stages](data_stages.md) before interpreting the tables if these labels are unfamiliar.
+
 | Family | Signal | CPM denominator | Extra normalization |
 |---|---|---|---|
 | `all_reads` | C0 aligned blocks | C0 | none |
