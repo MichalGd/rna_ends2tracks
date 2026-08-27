@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$TAG" ]] || { echo "--tag is required" >&2; exit 2; }
-[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]] || { echo "Unexpected release tag: $TAG" >&2; exit 2; }
+[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+([.]post[0-9]+)?$ ]] || { echo "Unexpected release tag: $TAG" >&2; exit 2; }
 [[ -x "$MAMBA" ]] || { echo "Mamba is not executable: $MAMBA" >&2; exit 2; }
 [[ -d "$ENV_PARENT" && -w "$ENV_PARENT" ]] || { echo "Environment parent is not writable: $ENV_PARENT" >&2; exit 2; }
 mkdir -p "$BIN_DIR"
@@ -63,6 +63,8 @@ nice -n 10 "$MAMBA" --no-rc env create --prefix "$ENV_PREFIX" --file environment
   'stopifnot(requireNamespace("DESeq2"),requireNamespace("DEXSeq"),requireNamespace("DRIMSeq"),requireNamespace("stageR"))'
 "$MAMBA" run -p "$ENV_PREFIX" Rscript -e \
   'files <- list.files("scripts/R", pattern="[.]R$", full.names=TRUE); stopifnot(length(files) == 4L); invisible(lapply(files, parse))'
+"$MAMBA" run -p "$ENV_PREFIX" Rscript scripts/R/dexseq_all_pairs.R --self-test \
+  2>&1 | tee "$INSTALL_AUDIT/r-dexseq-hotfix-smoke.log"
 "$MAMBA" run -p "$ENV_PREFIX" Rscript tests/R/deseq2_pairing_smoke.R \
   2>&1 | tee "$INSTALL_AUDIT/r-deseq2-smoke.log"
 "$ENV_PREFIX/bin/rna-ends2tracks" --version
