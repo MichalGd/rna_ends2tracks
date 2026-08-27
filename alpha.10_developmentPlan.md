@@ -16,9 +16,10 @@ The first laptop-only development slice is in progress and does not alter the ac
 - parent-process progress events and per-worker timing/PID records;
 - cross-process-safe event, master-log, and atomic status updates;
 - a resumable post-alignment `c0_tracks` stage with separate C0/end receipts and no repeated C0 strand extraction per normalization;
+- a richer status snapshot with workflow PID state, ordered stages, disk availability, and principal output counts;
 - a beginner-facing C0-C5 data-stage glossary.
 
-These items remain development changes until the complete regression suite and Linux integration checks pass. No stable launcher, installed environment, PAS atlas, active project configuration, or current output directory is modified by this work.
+The Python 3.10/3.11, shell/R parsing, repository-contract, and complete Linux Conda-environment checks pass on the feature branch. These remain unreleased development changes. No stable launcher, installed environment, PAS atlas, active project configuration, or current output directory is modified by this work.
 
 ## 1. Executive decision
 

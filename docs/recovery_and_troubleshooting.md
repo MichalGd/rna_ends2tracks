@@ -9,7 +9,7 @@ tail -F /path/to/OUTPUT_DIR/rna_ends2tracks.log
 rna-ends2tracks status /path/to/project/config/config.conf
 ```
 
-The status command can also receive `OUTPUT_DIR` directly. Add `--json` for the complete machine-readable snapshot. The master log reports stages and native-command outcomes in chronological order and points to the detailed log for each native tool. `logs/events.jsonl` remains available for programmatic parsing.
+The status command can also receive `OUTPUT_DIR` directly. It reports the workflow PID/process state, ordered stage states, free disk space, and counts of expected principal outputs. Add `--json` for the complete machine-readable snapshot. The master log reports stages and native-command outcomes in chronological order and points to the detailed log for each native tool. `logs/events.jsonl` remains available for programmatic parsing.
 
 If the status is `failed`, the last message identifies the failed stage. Read the referenced detailed log before using `--force-step`; a normal rerun is sufficient when valid receipts already exist.
 

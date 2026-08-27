@@ -97,6 +97,8 @@ def _update_status(results: Path, payload: dict[str, object]) -> None:
     })
     if module == "workflow":
         state["workflow_status"] = status
+        if status == "started":
+            state["workflow_pid"] = payload["pid"]
     elif status == "failed":
         state["workflow_status"] = "failed"
     elif state.get("workflow_status") not in {"completed", "failed"}:

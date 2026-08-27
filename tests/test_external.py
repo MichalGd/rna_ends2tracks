@@ -55,12 +55,36 @@ class UnifiedLoggingTests(unittest.TestCase):
     def test_status_command_accepts_results_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             results = Path(temporary) / "results"
+            metadata = results / "00_metadata"
+            metadata.mkdir(parents=True)
+            (metadata / "contrasts.tsv").write_text(
+                "contrast_id\tnumerator\tdenominator\nB_vs_A\tB\tA\n", encoding="utf-8"
+            )
+            sample_dir = results / "02_alignment" / "S1"
+            sample_dir.mkdir(parents=True)
+            (sample_dir / "S1.bam").write_bytes(b"bam")
+            track_dir = results / "09_tracks"
+            track_dir.mkdir(parents=True)
+            (track_dir / "S1.plus.bw").write_bytes(b"bw")
             event(results / "logs", "workflow", "completed", "Done")
             output = StringIO()
             with redirect_stdout(output):
                 self.assertEqual(show_status(results), 0)
             self.assertIn("Workflow status: completed", output.getvalue())
             self.assertIn(str((results / "rna_ends2tracks.log").resolve()), output.getvalue())
+            self.assertIn("contrasts=1, BAMs=1, BigWigs=1", output.getvalue())
+            self.assertIn("Workflow PID:", output.getvalue())
+
+    def test_status_json_adds_live_observations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "results"
+            event(results / "logs", "workflow", "started", "Running")
+            output = StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(show_status(results, as_json=True), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["observed"]["process_state"], "running")
+            self.assertEqual(payload["observed"]["workflow_pid"], payload["workflow_pid"])
 
     def test_event_updates_are_process_safe(self):
         from rnaends2tracks.execution import run_bounded_processes

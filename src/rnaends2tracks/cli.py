@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -76,15 +78,75 @@ def show_status(target: str | Path, as_json: bool = False) -> int:
     else:
         results = path
     payload = read_run_status(results)
+    observations = _status_observations(results, payload)
     if as_json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(json.dumps({**payload, "observed": observations}, indent=2, sort_keys=True))
     else:
         print(f"Workflow status: {payload.get('workflow_status', 'unknown')}")
         print(f"Current stage:   {payload.get('current_stage', 'unknown')}")
         print(f"Last update:     {payload.get('updated_at', 'unknown')}")
         print(f"Message:         {payload.get('last_message', '')}")
+        print(f"Workflow PID:    {observations['workflow_pid']} ({observations['process_state']})")
+        print(f"Output directory:{' ' if str(results) else ''}{results}")
         print(f"Master log:      {results / 'rna_ends2tracks.log'}")
+        print(f"Free disk:       {observations['free_disk_gb']:.1f} GiB")
+        print("Outputs:         " + ", ".join(
+            f"{key}={value}" for key, value in observations["outputs"].items()
+        ))
+        print("Stages:")
+        stages = payload.get("stages", {})
+        for step in STEPS:
+            record = stages.get(step, {}) if isinstance(stages, dict) else {}
+            print(f"  {step:<18} {record.get('status', 'pending')}")
     return 0
+
+
+def _process_state(pid: object, workflow_status: object) -> str:
+    if workflow_status in {"completed", "failed"}:
+        return "not running"
+    try:
+        numeric_pid = int(pid)
+        os.kill(numeric_pid, 0)
+    except (TypeError, ValueError, ProcessLookupError):
+        return "not running"
+    except PermissionError:
+        return "running (owned by another user)"
+    except OSError:
+        return "unknown"
+    return "running"
+
+
+def _table_rows(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    with path.open(encoding="utf-8-sig") as handle:
+        return max(sum(1 for line in handle if line.strip()) - 1, 0)
+
+
+def _status_observations(results: Path, payload: dict[str, object]) -> dict[str, object]:
+    alignment = results / "02_alignment"
+    final_bams = sum(
+        (directory / f"{directory.name}.bam").is_file()
+        for directory in alignment.iterdir()
+        if alignment.is_dir() and directory.is_dir()
+    ) if alignment.is_dir() else 0
+    usage = shutil.disk_usage(results)
+    pid = payload.get("workflow_pid", payload.get("pid", "unknown"))
+    outputs = {
+        "contrasts": _table_rows(results / "00_metadata" / "contrasts.tsv"),
+        "BAMs": final_bams,
+        "BigWigs": len(list((results / "09_tracks").rglob("*.bw"))),
+        "DGE": len(list((results / "05_gene_expression").rglob("*.deseq2.tsv"))),
+        "APA-A": len(list((results / "06_apa_a_mcell2019").rglob("*.dexseq.tsv"))),
+        "APA-B": len(list((results / "07_apa_b").rglob("*.drimseq_stager.tsv"))),
+        "reports": int((results / "10_reports" / "report.html").is_file()),
+    }
+    return {
+        "workflow_pid": pid,
+        "process_state": _process_state(pid, payload.get("workflow_status")),
+        "free_disk_gb": usage.free / 1024**3,
+        "outputs": outputs,
+    }
 
 
 def _normal_step(value: str | None, fallback: str) -> str:
