@@ -2,7 +2,7 @@ name: Complete environment
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feature/**"]
     paths:
       - environment.yml
       - .github/workflows/environment.yml
