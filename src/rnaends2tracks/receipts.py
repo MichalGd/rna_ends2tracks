@@ -13,6 +13,16 @@ from typing import Any
 from . import __version__
 
 HASH_LIMIT_BYTES = 64 * 1024 * 1024
+COMPATIBLE_WORKFLOW_VERSIONS = {
+    "0.1.0a9.post1": frozenset({"0.1.0a9"}),
+    "0.1.0a9.post2": frozenset({"0.1.0a9", "0.1.0a9.post1"}),
+}
+
+
+def workflow_version_compatible(receipt_version: object) -> bool:
+    """Allow only explicitly audited base receipts for this post-release hotfix."""
+    value = str(receipt_version)
+    return value == __version__ or value in COMPATIBLE_WORKFLOW_VERSIONS.get(__version__, ())
 
 
 def sha256(path: Path) -> str:
@@ -73,7 +83,7 @@ def receipt_valid(output_dir: Path, signature: str) -> bool:
     except (OSError, ValueError):
         return False
     if (
-        receipt.get("workflow_version") != __version__
+        not workflow_version_compatible(receipt.get("workflow_version"))
         or receipt.get("signature") != signature
         or receipt.get("exit_status") != 0
     ):

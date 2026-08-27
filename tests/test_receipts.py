@@ -36,6 +36,23 @@ class ReceiptTests(unittest.TestCase):
                 os.utime(output, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
                 self.assertFalse(receipt_valid(receipt_dir, "sig"))
 
+    def test_post2_accepts_only_audited_alpha9_family_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); output = root / "result.tsv"; output.write_bytes(b"abc")
+            receipt_dir = root / "receipt"
+            receipt = write_receipt("test", receipt_dir, "sig", [output], ["test"])
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            with patch("rnaends2tracks.receipts.__version__", "0.1.0a9.post2"):
+                payload["workflow_version"] = "0.1.0a9"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertTrue(receipt_valid(receipt_dir, "sig"))
+                payload["workflow_version"] = "0.1.0a9.post1"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertTrue(receipt_valid(receipt_dir, "sig"))
+                payload["workflow_version"] = "0.1.0a8"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertFalse(receipt_valid(receipt_dir, "sig"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,22 @@
 - Explain the workflow-specific C0-C5 count universes in a beginner-facing data-stage guide.
 - Split early C0 raw/CPM tracks from end-derived tracks with independent receipts and one strand-BAM extraction per sample/strand.
 
+## 0.1.0-alpha.9.post2 - 2026-08-27
+
+- Fix APA-A metadata mapping and fallback-comparator selection when DEXSeq returns factor-valued feature IDs: coerce PAS IDs to character and resolve them explicitly against the active-PAS catalog and named project C3 counts.
+- Restore project PAS identifiers on the DEXSeq normalized-count matrix before computing mean counts and PAU, instead of matching against DEXSeq's internal composite row names.
+- Make fallback-comparator filtering explicitly NA-safe so incomplete numerical rows cannot materialize artificial all-NA candidates during R data-frame subsetting.
+- Compute pooled raw counts once per contrast and fail with an actionable message if a comparator PAS is absent from the C3 matrix.
+- Add regression coverage for factor-valued PAS IDs, deterministic requested-ID order, missing PAS detection, and alpha.9.post1 receipt reuse.
+
+## 0.1.0-alpha.9.post1 - 2026-08-27
+
+- Fix unpaired APA-A DEXSeq formulas so a design without pairing covariates does not create a stray `:exon` term.
+- Remove non-tabular list-valued DEXSeq metadata columns before writing result TSVs.
+- Add a base-R paired/unpaired formula and result-serialization regression test that runs in CI and during installation.
+- Allow immutable post-release tags so urgent alpha hotfixes do not consume the broader alpha.10 development version.
+- Accept alpha.9 receipts only from this alpha.9.post1 hotfix, allowing downstream resume and final cleanup without recomputing successful upstream stages.
+
 ## 0.1.0-alpha.9 - 2026-08-27
 
 - Run MultiQC without its incompatible cleanup inside a workflow-owned temporary directory, then
