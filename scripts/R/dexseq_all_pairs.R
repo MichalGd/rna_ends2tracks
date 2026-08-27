@@ -47,6 +47,31 @@ pooled_raw_for_pas <- function(pooled_counts, pas_ids) {
   unname(pooled_counts[match(ids, names(pooled_counts))])
 }
 
+catalog_rows_for_pas <- function(catalog, pas_ids) {
+  ids <- as.character(pas_ids)
+  positions <- match(ids, as.character(catalog$pas_id))
+  if (anyNA(positions)) {
+    missing <- unique(ids[is.na(positions)])
+    stop(
+      "DEXSeq PAS absent from the active-PAS catalog: ",
+      paste(head(missing, 10), collapse=", ")
+    )
+  }
+  positions
+}
+
+name_count_rows_by_pas <- function(count_matrix, pas_ids) {
+  ids <- as.character(pas_ids)
+  if (nrow(count_matrix) != length(ids)) {
+    stop("Normalized DEXSeq count rows do not match the selected PAS universe")
+  }
+  if (anyNA(ids) || any(!nzchar(ids)) || anyDuplicated(ids)) {
+    stop("Selected PAS identifiers must be complete and unique")
+  }
+  rownames(count_matrix) <- ids
+  count_matrix
+}
+
 if ("--self-test" %in% args) {
   unpaired <- dexseq_formulas("~ condition")
   stopifnot(
@@ -73,12 +98,20 @@ if ("--self-test" %in% args) {
   pooled_fixture <- rowSums(raw_fixture)
   factor_ids <- factor(c("p2", "p1"), levels=c("p1", "p2", "unused"))
   stopifnot(identical(pooled_raw_for_pas(pooled_fixture, factor_ids), c(22, 11)))
+  catalog_fixture <- data.frame(
+    pas_id=c("p1", "p2"), gene_id=c("g1", "g2"), stringsAsFactors=FALSE
+  )
+  stopifnot(identical(catalog_rows_for_pas(catalog_fixture, factor_ids), c(2L, 1L)))
+  dexseq_named_fixture <- raw_fixture
+  rownames(dexseq_named_fixture) <- c("g1:p1", "g2:p2")
+  restored_fixture <- name_count_rows_by_pas(dexseq_named_fixture, c("p1", "p2"))
+  stopifnot(identical(rownames(restored_fixture), c("p1", "p2")))
   missing_error <- tryCatch(
     { pooled_raw_for_pas(pooled_fixture, "absent"); "" },
     error=function(condition) conditionMessage(condition)
   )
   stopifnot(grepl("Comparator PAS absent from the C3 count matrix: absent", missing_error, fixed=TRUE))
-  cat("DEXSeq formula, serialization, and comparator lookup self-test: PASS\n")
+  cat("DEXSeq formula, serialization, PAS naming, and comparator lookup self-test: PASS\n")
   quit(save="no", status=0)
 }
 
@@ -136,7 +169,7 @@ for (i in seq_len(nrow(contrasts))) {
   full_formula <- formulas$full
   reduced_formula <- formulas$reduced
 
-  eligible <- catalog$assignment_status == "unique" & nzchar(catalog$gene_id)
+  eligible <- catalog$assignment_status == "unique" & !is.na(catalog$gene_id) & nzchar(catalog$gene_id)
   first_count <- table(catalog$gene_id[eligible])
   eligible <- eligible & catalog$gene_id %in% names(first_count[first_count >= 2])
   eligible <- eligible & rowSums(count_matrix[catalog$pas_id, rownames(sample_data), drop=FALSE]) >= min_count
@@ -152,8 +185,10 @@ for (i in seq_len(nrow(contrasts))) {
   dxd <- testForDEU(dxd, reducedModel=reduced_formula)
   dxd <- estimateExonFoldChanges(dxd, fitExpToVar="condition")
   result <- tabular_dexseq_result(as.data.frame(DEXSeqResults(dxd)))
-  result$pas_id <- result$featureID
+  result$pas_id <- as.character(result$featureID)
+  result_catalog_rows <- catalog_rows_for_pas(catalog, result$pas_id)
   norm <- counts(dxd, normalized=TRUE)
+  norm <- name_count_rows_by_pas(norm, selected)
   den <- rowMeans(norm[, sample_data$condition == con$denominator, drop=FALSE])
   num <- rowMeans(norm[, sample_data$condition == con$numerator, drop=FALSE])
   all_mean <- rowMeans(norm)
@@ -164,9 +199,12 @@ for (i in seq_len(nrow(contrasts))) {
   result$PAU_denominator <- ifelse(den_total > 0, den / den_total, 0)
   result$PAU_numerator <- ifelse(num_total > 0, num / num_total, 0)
   result$delta_PAU <- result$PAU_numerator - result$PAU_denominator
-  result$gene_id <- catalog$gene_id[match(result$pas_id, catalog$pas_id)]
-  result$summit_start <- catalog$summit_start[match(result$pas_id, catalog$pas_id)]
-  result$strand <- catalog$strand[match(result$pas_id, catalog$pas_id)]
+  result$gene_id <- as.character(catalog$gene_id[result_catalog_rows])
+  result$summit_start <- catalog$summit_start[result_catalog_rows]
+  result$strand <- as.character(catalog$strand[result_catalog_rows])
+  if (anyNA(result$gene_id) || any(!nzchar(result$gene_id))) {
+    stop("Active-PAS catalog returned an empty gene_id for a DEXSeq PAS")
+  }
   result <- result[, c("pas_id", "gene_id", "summit_start", "strand", setdiff(colnames(result), c("pas_id", "gene_id", "summit_start", "strand")))]
   target <- file.path(outdir, paste0(con$contrast_id, ".dexseq.tsv"))
   write.table(result, target, sep="\t", quote=FALSE, row.names=FALSE)
@@ -184,7 +222,13 @@ for (i in seq_len(nrow(contrasts))) {
     if (nrow(ordered) >= 2) {
       chosen <- ordered[1:2, , drop=FALSE]; comparator_rule <- "two_significant_lowest_padj"
     } else {
-      other <- rows[rows$pas_id != ordered$pas_id[1] & rows$mean_normalized_count > 0, , drop=FALSE]
+      eligible_other <- (
+        !is.na(rows$pas_id) & nzchar(as.character(rows$pas_id)) &
+        as.character(rows$pas_id) != as.character(ordered$pas_id[1]) &
+        !is.na(rows$mean_normalized_count) & is.finite(rows$mean_normalized_count) &
+        rows$mean_normalized_count > 0
+      )
+      other <- rows[eligible_other, , drop=FALSE]
       if (!nrow(other)) {
         shift_rows[[length(shift_rows) + 1]] <- data.frame(gene_id=gene, shift="not_classifiable", proximal_pas="", distal_pas="",
           ratio_numerator="NA", ratio_denominator="NA", comparator_rule="no_nonzero_comparator", stringsAsFactors=FALSE)
