@@ -6,10 +6,11 @@ import shlex
 import shutil
 import subprocess
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Callable, Iterator
 
 
 _EVENT_LOCK = threading.Lock()
@@ -230,6 +231,36 @@ def event(log_dir: Path, module: str, status: str, message: str) -> None:
         with (results / "rna_ends2tracks.log").open("a", encoding="utf-8") as handle:
             handle.write(readable)
         _update_status(results, payload)
+
+
+def _duration(seconds: float) -> str:
+    rounded = max(0, int(round(seconds)))
+    hours, remainder = divmod(rounded, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def progress_events(
+    log_dir: Path, module: str, total: int, unit: str,
+) -> Callable[[str, str], None]:
+    """Return a parent-process callback that reports bounded-pool progress and ETA."""
+    started = time.monotonic()
+    finished = 0
+    lock = threading.Lock()
+
+    def report(label: str, status: str) -> None:
+        nonlocal finished
+        with lock:
+            finished += 1
+            elapsed = time.monotonic() - started
+            eta = elapsed / finished * (total - finished) if finished and finished < total else 0.0
+            message = (
+                f"{unit} {label} {status} ({finished}/{total}); "
+                f"elapsed={_duration(elapsed)}; ETA~{_duration(eta)}"
+            )
+            event(log_dir, module, "failed" if status == "failed" else "progress", message)
+
+    return report
 
 
 def read_run_status(results: Path) -> dict[str, object]:

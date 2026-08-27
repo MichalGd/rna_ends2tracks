@@ -7,7 +7,7 @@ from io import StringIO
 from pathlib import Path
 
 from rnaends2tracks.cli import show_status
-from rnaends2tracks.external import event, run, run_capture, run_to_path
+from rnaends2tracks.external import event, progress_events, run, run_capture, run_to_path
 
 
 def process_event(results, index):
@@ -100,6 +100,17 @@ class UnifiedLoggingTests(unittest.TestCase):
             self.assertEqual(len(lines), 4)
             self.assertTrue(all(json.loads(line)["module"] == "parallel_test" for line in lines))
             json.loads((results / "00_metadata" / "run_status.json").read_text())
+
+    def test_progress_callback_reports_completed_total_and_eta(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "results"
+            progress = progress_events(results / "logs", "apa_a", 2, "contrast")
+            progress("B_vs_A", "completed")
+            progress("C_vs_A", "completed")
+            master = (results / "rna_ends2tracks.log").read_text(encoding="utf-8")
+            self.assertIn("contrast B_vs_A completed (1/2)", master)
+            self.assertIn("contrast C_vs_A completed (2/2)", master)
+            self.assertIn("ETA~00:00:00", master)
 
 
 if __name__ == "__main__":

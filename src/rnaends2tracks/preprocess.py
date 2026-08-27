@@ -12,7 +12,7 @@ from typing import Any
 
 from .config import RunPlan, signature_for
 from .execution import run_bounded
-from .external import event, require_tools, run, run_to_path
+from .external import event, progress_events, require_tools, run, run_to_path
 from .paths import workflow_asset
 from .receipts import receipt_valid, write_receipt
 
@@ -147,7 +147,10 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
 
         trim_jobs.append((token, trim_worker))
 
-    run_bounded("qc_and_trim", trim_jobs, resource["trim_parallel_jobs"], timing_dir / "trim")
+    run_bounded(
+        "qc_and_trim", trim_jobs, resource["trim_parallel_jobs"], timing_dir / "trim",
+        progress=progress_events(log_dir, "alignment", len(trim_jobs), "QC/trim lane"),
+    )
 
     alignment_jobs: list[tuple[str, Any]] = []
     for context in contexts:
@@ -226,8 +229,10 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
 
         alignment_jobs.append((context["token"], alignment_worker))
 
-    orientation_rows = run_bounded("star_and_sort", alignment_jobs, resource["star_parallel_jobs"],
-                                   timing_dir / "alignment")
+    orientation_rows = run_bounded(
+        "star_and_sort", alignment_jobs, resource["star_parallel_jobs"], timing_dir / "alignment",
+        progress=progress_events(log_dir, "alignment", len(alignment_jobs), "STAR lane"),
+    )
 
     merge_jobs: list[tuple[str, Any]] = []
     for sample in plan.samples:
@@ -282,7 +287,10 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
 
         merge_jobs.append((sample_id, merge_worker))
 
-    run_bounded("preprocess_merges", merge_jobs, resource["merge_parallel_jobs"], timing_dir / "merges")
+    run_bounded(
+        "preprocess_merges", merge_jobs, resource["merge_parallel_jobs"], timing_dir / "merges",
+        progress=progress_events(log_dir, "alignment", len(merge_jobs), "C0 sample"),
+    )
     # Frozen shared environments make MultiQC's copied template directories read-only.
     # Disable MultiQC's own cleanup and remove only our dedicated temporary tree.
     multiqc_temp_parent = results / ".checkpoints" / "multiqc_tmp"

@@ -11,7 +11,7 @@ import pysam
 
 from .config import RunPlan, sample_universe, signature_for
 from .execution import run_bounded_processes
-from .external import event, require_tools
+from .external import event, progress_events, require_tools
 from .mcell2019 import (
     assign_gene,
     build_gene_bins,
@@ -283,9 +283,7 @@ def exact_ends_stage(plan: RunPlan, results: Path, dry_run: bool = False, force:
         outputs_nested = run_bounded_processes(
             "exact_ends", jobs, plan.project["resources"]["apa_a"]["extraction_parallel_jobs"],
             results / ".checkpoints" / "timings" / "exact_ends",
-            progress=lambda label, status: event(
-                log_dir, "exact_ends", status, f"Sample worker {label} {status}"
-            ),
+            progress=progress_events(log_dir, "exact_ends", len(jobs), "sample"),
         )
         outputs = [path for paths in outputs_nested for path in paths]
         write_receipt("exact_ends", exact_root, exact_signature, outputs, ["rna-ends2tracks", "exact_ends"])

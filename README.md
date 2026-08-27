@@ -95,7 +95,7 @@ rna-ends2tracks status config/config.conf
 ```
 
 Detailed native-tool output remains under `OUTPUT_DIR/logs/`, and the latest machine-readable state is `OUTPUT_DIR/00_metadata/run_status.json`.
-The status snapshot includes the workflow PID and whether it is still running, an ordered stage table, free disk space, and counts of contrasts, final BAMs, BigWigs, DGE/APA result tables, and reports. Use `--json` for the same observations in machine-readable form.
+The status snapshot includes the workflow PID and whether it is still running, an ordered stage table, free disk space, and counts of contrasts, final BAMs, BigWigs, DGE/APA result tables, and reports. Bounded lane, sample, track, and contrast pools report completed/total work, elapsed time, and an approximate ETA to the master log. Use `--json` for the same observations in machine-readable form.
 
 Useful controls:
 

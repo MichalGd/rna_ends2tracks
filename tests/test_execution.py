@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from functools import partial
 from pathlib import Path
 
 from rnaends2tracks.execution import DEFAULT_RESOURCES, resource_plan_rows, run_bounded_processes
@@ -12,6 +13,11 @@ def process_identity(value):
 
 def process_failure():
     raise ValueError("intentional worker failure")
+
+
+def append_value(target, value):
+    target.append(value)
+    return value
 
 
 class ProcessExecutionTests(unittest.TestCase):
@@ -41,6 +47,25 @@ class ProcessExecutionTests(unittest.TestCase):
                 run_bounded_processes(
                     "test_processes", [("broken", process_failure, ())], 1, Path(temporary)
                 )
+
+    def test_thread_pool_reports_each_terminal_worker_state(self):
+        from rnaends2tracks.execution import run_bounded
+
+        with tempfile.TemporaryDirectory() as temporary:
+            returned = []
+            progress = []
+            jobs = [
+                ("one", partial(append_value, returned, 1)),
+                ("two", partial(append_value, returned, 2)),
+            ]
+            self.assertEqual(
+                run_bounded(
+                    "threads", jobs, 2, Path(temporary),
+                    progress=lambda label, status: progress.append((label, status)),
+                ),
+                [1, 2],
+            )
+            self.assertEqual(set(progress), {("one", "completed"), ("two", "completed")})
 
 
 if __name__ == "__main__":

@@ -79,8 +79,14 @@ class PreprocessOrderTests(unittest.TestCase):
                 elif command[:2] == ["samtools", "index"]:
                     Path(command[command.index("-o") + 1]).write_bytes(b"index")
 
-            def immediate(stage, jobs, workers, _timing):
-                phases.append((stage, workers)); return [worker() for _, worker in jobs]
+            def immediate(stage, jobs, workers, _timing, progress=None):
+                phases.append((stage, workers))
+                values = []
+                for label, worker in jobs:
+                    values.append(worker())
+                    if progress is not None:
+                        progress(label, "completed")
+                return values
 
             def fake_run_to_path(_command, output, _log, dry_run=False, cwd=None, env=None):
                 self.assertFalse(dry_run)

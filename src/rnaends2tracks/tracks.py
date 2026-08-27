@@ -8,7 +8,7 @@ from typing import Any
 
 from .config import RunPlan, signature_for
 from .execution import run_bounded_processes
-from .external import event, require_tools, run, run_capture, run_to_path
+from .external import event, progress_events, require_tools, run, run_capture, run_to_path
 from .paths import workflow_asset
 from .receipts import receipt_valid, write_receipt
 
@@ -318,9 +318,7 @@ def _run_track_subset(
     completed = run_bounded_processes(
         receipt_group, jobs, plan.project["resources"]["tracks"]["parallel_jobs"],
         results / ".checkpoints" / "timings" / receipt_group,
-        progress=lambda label, status: event(
-            results / "logs", event_module, status, f"Sample worker {label} {status}"
-        ),
+        progress=progress_events(results / "logs", event_module, len(jobs), "sample"),
     )
     return (
         [path for paths, _rows in completed for path in paths],
