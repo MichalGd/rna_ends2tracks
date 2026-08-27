@@ -26,6 +26,7 @@ flowchart TD
     V --> QT[Raw FastQC and BBDuk trimming]
     QT --> STAR[STAR alignment and orientation check]
     STAR --> C0[C0 mapped primary NH=1 alignments]
+    C0 --> C0TRACKS[Early raw and CPM strand-specific C0 tracks]
     C0 --> C1[C1 exact transcript ends]
     C0 --> C1S[C1S end-defining clipped reads: QC]
     C1 --> MASK[Strand-specific internal-priming mask]
@@ -41,7 +42,7 @@ flowchart TD
     C4 --> DGE[Pairwise DESeq2 DGE]
     C3 --> APA[Pairwise DEXSeq APA and shift direction]
     C4 --> SF[Global DESeq2 and robust-CPM factors]
-    C0 --> TRACKS[Strand-specific tracks]
+    C0TRACKS --> TRACKS[Combined strand-specific track index]
     C1 --> TRACKS
     C2 --> TRACKS
     C2R --> TRACKS
@@ -103,6 +104,8 @@ rna-ends2tracks --from-step exact_ends config/config.conf
 rna-ends2tracks --stop-after alignment config/config.conf
 rna-ends2tracks --force-step tracks config/config.conf
 ```
+
+With the default `GENERATE_EARLY_C0_TRACKS=true`, raw and CPM all-read BigWigs are produced by the resumable `c0_tracks` stage immediately after alignment, before exact-end, DGE, and APA analysis. The later `tracks` stage reuses those outputs and generates only end-derived families; it does not repeat C0 strand extraction.
 
 Matching receipts skip complete work. Small outputs use SHA-256 validation; large BAM/track outputs use size plus nanosecond mtime to keep resume checks fast after native tool validation. A lock under `.checkpoints/workflow.lock` prevents two processes from modifying the same output directory.
 

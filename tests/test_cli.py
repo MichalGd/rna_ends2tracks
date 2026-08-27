@@ -45,6 +45,7 @@ class CliTests(unittest.TestCase):
             self.assertTrue((root / "results" / "00_metadata" / "resource_plan.tsv").is_file())
             events = (root / "results" / "logs" / "events.jsonl").read_text(encoding="utf-8")
             self.assertIn('"module": "preprocess"', events)
+            self.assertIn('"module": "c0_tracks"', events)
             self.assertIn('"status": "dry_run"', events)
             master = (root / "results" / "rna_ends2tracks.log").read_text(encoding="utf-8")
             self.assertIn("[workflow] STARTED", master)

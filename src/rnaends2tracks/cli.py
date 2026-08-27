@@ -26,13 +26,16 @@ from .locking import run_lock
 from .paths import workflow_asset
 from .preprocess import preprocess
 from .report import make_report
-from .tracks import make_tracks
+from .tracks import make_c0_tracks, make_tracks
 
 STEPS = (
-    "validate", "alignment", "exact_ends", "active_pas", "gene_expression",
+    "validate", "alignment", "c0_tracks", "exact_ends", "active_pas", "gene_expression",
     "apa_a", "apa_b", "apa_comparison", "tracks", "report", "cleanup",
 )
-ALIASES = {"preprocess": "alignment", "dge": "gene_expression", "compare": "apa_comparison"}
+ALIASES = {
+    "preprocess": "alignment", "early_tracks": "c0_tracks",
+    "dge": "gene_expression", "compare": "apa_comparison",
+}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -147,6 +150,7 @@ def execute(args: argparse.Namespace) -> int:
         actions: dict[str, Callable[[], object]] = {
             "validate": lambda: None,
             "alignment": lambda: preprocess(plan, results, args.dry_run, "alignment" in forced),
+            "c0_tracks": lambda: make_c0_tracks(plan, results, args.dry_run, "c0_tracks" in forced),
             "exact_ends": lambda: exact_ends_stage(plan, results, args.dry_run, "exact_ends" in forced),
             "active_pas": lambda: active_pas_stage(plan, results, args.dry_run, "active_pas" in forced),
             "gene_expression": lambda: gene_expression(
@@ -161,6 +165,14 @@ def execute(args: argparse.Namespace) -> int:
         modules = plan.project.get("modules", {})
         requirements = workflow_requirements(plan.project)
         for step in steps:
+            if step == "c0_tracks" and not (
+                modules.get("tracks", True)
+                and plan.project["tracks"].get("early_c0", True)
+                and plan.project["tracks"]["families"].get("all_reads", False)
+            ):
+                event(results / "logs", step, "disabled",
+                      "Requires RUN_TRACKS, GENERATE_EARLY_C0_TRACKS and GENERATE_ALL_READ_TRACKS")
+                continue
             if step == "exact_ends" and not requirements["exact_ends"]:
                 event(results / "logs", step, "disabled", "No enabled module or track family requires exact ends")
                 continue

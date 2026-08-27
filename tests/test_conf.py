@@ -54,6 +54,7 @@ class ConfTests(unittest.TestCase):
                 "MM39_CHROM_SIZES=/ref/m/sizes", "MM39_PAS_ATLAS=/ref/m/pas",
             ]) + "\n", encoding="utf-8")
             plan = build_conf_plan(config, check_inputs=False)
+            self.assertTrue(plan.project["tracks"]["early_c0"])
             self.assertEqual(len(plan.contrasts), 2)
             self.assertEqual({row["genome"] for row in plan.contrasts}, {"GRCh38", "GRCm39"})
             self.assertTrue(all(row["contrast_id"].startswith(row["genome"] + ".") for row in plan.contrasts))

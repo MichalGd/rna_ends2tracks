@@ -19,8 +19,9 @@ class ProcessExecutionTests(unittest.TestCase):
         rows = resource_plan_rows(DEFAULT_RESOURCES, {"samples": 4})
         exact = next(row for row in rows if row["work_unit"] == "exact_end_extraction")
         self.assertEqual(exact["executor"], "python_process")
-        tracks = next(row for row in rows if row["stage"] == "tracks")
-        self.assertEqual(tracks["executor"], "python_process_and_external_process")
+        tracks = [row for row in rows if row["stage"] == "tracks"]
+        self.assertEqual({row["work_unit"] for row in tracks}, {"c0_sample", "end_sample"})
+        self.assertTrue(all(row["executor"] == "python_process_and_external_process" for row in tracks))
 
     def test_process_pool_preserves_order_and_records_worker_pids(self):
         with tempfile.TemporaryDirectory() as temporary:

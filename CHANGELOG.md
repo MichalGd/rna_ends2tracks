@@ -6,6 +6,7 @@
 - Add an internal chronological master log, atomic run-status snapshot, and `rna-ends2tracks status` command.
 - Record native-command and stage lifecycle events while retaining detailed per-tool logs.
 - Explain the workflow-specific C0-C5 count universes in a beginner-facing data-stage guide.
+- Split early C0 raw/CPM tracks from end-derived tracks with independent receipts and one strand-BAM extraction per sample/strand.
 
 ## 0.1.0-alpha.9 - 2026-08-27
 

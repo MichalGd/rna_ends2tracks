@@ -17,6 +17,7 @@ END_FAMILIES = {
     "filtered_ends": "C2_filtered_ends.tsv.gz",
     "rejected_ends": "C2R_internal_priming_rejects.tsv.gz",
 }
+TRACK_FIELDS = ["sample_id", "genome", "family", "normalization", "denominator", "scale", "count_universe"]
 
 
 def _negated(source: Path, target: Path) -> None:
@@ -83,10 +84,12 @@ def _bam_count(bam: Path, log: Path, threads: int) -> int:
     return int(stdout.strip())
 
 
-def _all_read_bedgraph(bam: Path, strand: str, output: Path, scale: float, threads: int, log: Path) -> Path:
-    strand_bam = output.with_suffix(".strand.bam")
+def _strand_bam(bam: Path, strand: str, output: Path, threads: int, log: Path) -> None:
     flag_args = ["-f", "16"] if strand == "plus" else ["-F", "16"]
-    run(["samtools", "view", "-@", str(threads), "-b", *flag_args, "-o", str(strand_bam), str(bam)], log, False)
+    run(["samtools", "view", "-@", str(threads), "-b", *flag_args, "-o", str(output), str(bam)], log, False)
+
+
+def _all_read_bedgraph(strand_bam: Path, strand: str, output: Path, scale: float, log: Path) -> None:
     positive = output if strand == "plus" else output.with_suffix(".positive.bedGraph")
     run_to_path(
         ["bedtools", "genomecov", "-ibam", str(strand_bam), "-bg", "-scale", f"{scale:.15g}"],
@@ -94,41 +97,65 @@ def _all_read_bedgraph(bam: Path, strand: str, output: Path, scale: float, threa
     )
     if strand == "minus":
         _negated(positive, output)
-    return strand_bam
 
 
-def _sample_tracks(plan: RunPlan, results: Path, sample: dict[str, str], force: bool) -> tuple[list[Path], list[dict[str, Any]]]:
+def _sample_tracks_subset(
+    plan: RunPlan,
+    results: Path,
+    sample: dict[str, str],
+    force: bool,
+    selected_families: tuple[str, ...],
+    selected_normalizations: tuple[str, ...],
+    receipt_group: str,
+) -> tuple[list[Path], list[dict[str, Any]]]:
     sample_id, genome = sample["sample_id"], sample["genome"]
     reference = plan.reference_for(genome)
     settings = plan.project["tracks"]
+    families = {
+        key: bool(value and key in selected_families)
+        for key, value in settings["families"].items()
+    }
+    enabled_normalizations = {
+        key: bool(value and key in selected_normalizations)
+        for key, value in settings["normalizations"].items()
+    }
     resource = plan.project["resources"]["tracks"]
     track_root = results / "09_tracks"
     intermediate = track_root / ".intermediate" / sample_id
-    receipt_dir = track_root / ".receipts" / sample_id
+    receipt_dir = track_root / ".receipts" / receipt_group / sample_id
     bam = results / "02_alignment" / sample_id / f"{sample_id}.bam"
     size_factor_path = results / "04_active_pas" / genome / "C4_track_size_factors.tsv"
     inputs: list[Path] = [bam, Path(reference["chrom_sizes"])]
     needs_factors = (
-        settings["normalizations"]["deseq2"] or settings["normalizations"]["robust_cpm"]
-    ) and (settings["families"]["active_pas"] or settings["families"]["filtered_ends"])
+        enabled_normalizations["deseq2"] or enabled_normalizations["robust_cpm"]
+    ) and (families["active_pas"] or families["filtered_ends"])
     if needs_factors:
         inputs.append(size_factor_path)
     for family, filename in END_FAMILIES.items():
-        if settings["families"][family]:
+        if families[family]:
             inputs.append(results / "03_exact_ends" / genome / sample_id / filename)
-    if settings["families"]["active_pas"]:
+    if families["active_pas"]:
         inputs.extend([
             results / "04_active_pas" / genome / "active_pas_catalog.tsv",
             results / "04_active_pas" / genome / "C3_active_pas_counts.tsv",
         ])
-    signature = signature_for(inputs, {"module": "tracks", "sample": sample, "settings": settings})
+    subset_settings = {
+        "families": families,
+        "normalizations": enabled_normalizations,
+        "generate_bigwigs": settings["generate_bigwigs"],
+        "retain_bedgraph": settings["retain_bedgraph"],
+    }
+    signature = signature_for(
+        inputs,
+        {"module": receipt_group, "sample": sample, "settings": subset_settings},
+    )
     if not force and receipt_valid(receipt_dir, signature):
         receipt = receipt_dir / "run_receipt.json"
         fragment = receipt_dir / "normalization.tsv"
         receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
         with fragment.open(encoding="utf-8", newline="") as handle:
             return [Path(row["path"]) for row in receipt_payload["outputs"]], list(csv.DictReader(handle, delimiter="\t"))
-    factors = _size_factors(size_factor_path)[sample_id] if size_factor_path.is_file() else {}
+    factors = _size_factors(size_factor_path)[sample_id] if needs_factors else {}
     expected: list[Path] = []
     normalization_rows: list[dict[str, Any]] = []
     intermediate.mkdir(parents=True, exist_ok=True)
@@ -140,19 +167,19 @@ def _sample_tracks(plan: RunPlan, results: Path, sample: dict[str, str], force: 
 
     family_rows: dict[str, list[dict[str, str]]] = {}
     denominators: dict[str, int] = {}
-    if settings["families"]["all_reads"]:
+    if families["all_reads"]:
         denominators["all_reads"] = _bam_count(bam, results / "logs" / "tracks" / f"{sample_id}.count.log", resource["samtools_threads"])
     for family, filename in END_FAMILIES.items():
-        if settings["families"][family]:
+        if families[family]:
             rows = _end_counts(results / "03_exact_ends" / genome / sample_id / filename)
             family_rows[family] = rows
             denominators[family] = sum(int(row["count"]) for row in rows)
-    if settings["families"]["rejected_ends"]:
+    if families["rejected_ends"]:
         if "exact_ends" not in denominators:
             c1_rows = _end_counts(results / "03_exact_ends" / genome / sample_id / END_FAMILIES["exact_ends"])
             denominators["exact_ends"] = sum(int(row["count"]) for row in c1_rows)
         denominators["rejected_ends"] = denominators["exact_ends"]
-    if settings["families"]["active_pas"]:
+    if families["active_pas"]:
         rows, assigned = _active_counts(
             results / "04_active_pas" / genome / "active_pas_catalog.tsv",
             results / "04_active_pas" / genome / "C3_active_pas_counts.tsv", sample_id,
@@ -160,21 +187,31 @@ def _sample_tracks(plan: RunPlan, results: Path, sample: dict[str, str], force: 
         family_rows["active_pas"] = rows
         denominators["active_pas"] = assigned
 
-    for family, enabled in settings["families"].items():
+    strand_bams: dict[str, Path] = {}
+    if families["all_reads"]:
+        for strand in ("plus", "minus"):
+            strand_bam = intermediate / f"{sample_id}.all_reads.{strand}.strand.bam"
+            _strand_bam(
+                bam, strand, strand_bam, resource["samtools_threads"],
+                results / "logs" / "tracks" / f"{sample_id}.all_reads.{strand}.strand_bam.log",
+            )
+            strand_bams[strand] = strand_bam
+
+    for family, enabled in families.items():
         if not enabled:
             continue
-        normalizations: list[tuple[str, float]] = []
-        if settings["normalizations"]["raw"]:
-            normalizations.append(("raw", 1.0))
-        if settings["normalizations"]["cpm"]:
+        normalization_scales: list[tuple[str, float]] = []
+        if enabled_normalizations["raw"]:
+            normalization_scales.append(("raw", 1.0))
+        if enabled_normalizations["cpm"]:
             denominator = denominators.get(family, 0)
-            normalizations.append(("cpm", 1_000_000.0 / denominator if denominator else 0.0))
+            normalization_scales.append(("cpm", 1_000_000.0 / denominator if denominator else 0.0))
         if family in {"filtered_ends", "active_pas"}:
-            if settings["normalizations"]["deseq2"]:
-                normalizations.append(("deseq2", factors["deseq2"]))
-            if settings["normalizations"]["robust_cpm"]:
-                normalizations.append(("robust_cpm", factors["robust_cpm"]))
-        for normalization, scale in normalizations:
+            if enabled_normalizations["deseq2"]:
+                normalization_scales.append(("deseq2", factors["deseq2"]))
+            if enabled_normalizations["robust_cpm"]:
+                normalization_scales.append(("robust_cpm", factors["robust_cpm"]))
+        for normalization, scale in normalization_scales:
             normalization_rows.append({
                 "sample_id": sample_id, "genome": genome, "family": family,
                 "normalization": normalization, "denominator": denominators.get(family, ""),
@@ -190,7 +227,7 @@ def _sample_tracks(plan: RunPlan, results: Path, sample: dict[str, str], force: 
                 bigwig.parent.mkdir(parents=True, exist_ok=True)
                 if family == "all_reads":
                     _all_read_bedgraph(
-                        bam, strand, bedgraph, scale, resource["samtools_threads"],
+                        strand_bams[strand], strand, bedgraph, scale,
                         results / "logs" / "tracks" / f"{sample_id}.{family}.{normalization}.{strand}.log",
                     )
                 else:
@@ -226,12 +263,119 @@ def _sample_tracks(plan: RunPlan, results: Path, sample: dict[str, str], force: 
     receipt_dir.mkdir(parents=True, exist_ok=True)
     fragment = receipt_dir / "normalization.tsv"
     with fragment.open("w", encoding="utf-8", newline="") as handle:
-        fields = ["sample_id", "genome", "family", "normalization", "denominator", "scale", "count_universe"]
-        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
+        writer = csv.DictWriter(handle, fieldnames=TRACK_FIELDS, delimiter="\t", lineterminator="\n")
         writer.writeheader(); writer.writerows(normalization_rows)
     expected.append(fragment)
-    write_receipt("tracks_sample", receipt_dir, signature, expected, ["rna-ends2tracks", "tracks", sample_id])
+    write_receipt(
+        receipt_group + "_sample", receipt_dir, signature, expected,
+        ["rna-ends2tracks", receipt_group, sample_id],
+    )
     return expected, normalization_rows
+
+
+def _write_normalization(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=TRACK_FIELDS, delimiter="\t", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+    temporary.replace(path)
+
+
+def _read_normalization(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
+def _receipt_outputs(receipt_dir: Path) -> list[Path]:
+    receipt = receipt_dir / "run_receipt.json"
+    if not receipt.is_file():
+        return []
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    return [Path(row["path"]) for row in payload.get("outputs", [])]
+
+
+def _run_track_subset(
+    plan: RunPlan,
+    results: Path,
+    force: bool,
+    families: tuple[str, ...],
+    normalizations: tuple[str, ...],
+    receipt_group: str,
+    event_module: str,
+) -> tuple[list[Path], list[dict[str, Any]]]:
+    jobs = [
+        (
+            sample["sample_id"],
+            _sample_tracks_subset,
+            (plan, results, sample, force, families, normalizations, receipt_group),
+        )
+        for sample in plan.samples
+    ]
+    completed = run_bounded_processes(
+        receipt_group, jobs, plan.project["resources"]["tracks"]["parallel_jobs"],
+        results / ".checkpoints" / "timings" / receipt_group,
+        progress=lambda label, status: event(
+            results / "logs", event_module, status, f"Sample worker {label} {status}"
+        ),
+    )
+    return (
+        [path for paths, _rows in completed for path in paths],
+        [row for _paths, rows in completed for row in rows],
+    )
+
+
+def make_c0_tracks(plan: RunPlan, results: Path, dry_run: bool = False, force: bool = False) -> None:
+    """Publish all-read raw/CPM tracks immediately after final C0 BAM creation."""
+    settings = plan.project["tracks"]
+    logdir = results / "logs"
+    enabled = bool(
+        plan.project.get("modules", {}).get("tracks", True)
+        and settings.get("early_c0", True)
+        and settings["families"].get("all_reads", False)
+    )
+    if not enabled:
+        event(logdir, "c0_tracks", "disabled", "Early C0 track generation is disabled")
+        return
+    normalizations = tuple(
+        key for key in ("raw", "cpm") if settings["normalizations"].get(key, False)
+    )
+    if dry_run:
+        event(logdir, "c0_tracks", "dry_run",
+              "Would publish all-read " + "/".join(normalizations) + " strand-specific tracks")
+        return
+    required = ["samtools", "bedtools"]
+    if settings["generate_bigwigs"]:
+        required.append("bedGraphToBigWig")
+    require_tools(required)
+    outdir = results / "09_tracks"
+    stage_receipt = outdir / ".stage_receipts" / "tracks_c0"
+    signature_inputs = [
+        results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam"
+        for sample in plan.samples
+    ]
+    signature_inputs.extend(Path(plan.reference_for(sample["genome"])["chrom_sizes"]) for sample in plan.samples)
+    signature = signature_for(signature_inputs, {
+        "module": "tracks_c0", "samples": plan.samples,
+        "normalizations": normalizations,
+        "generate_bigwigs": settings["generate_bigwigs"],
+        "retain_bedgraph": settings["retain_bedgraph"],
+    })
+    if not force and receipt_valid(stage_receipt, signature):
+        event(logdir, "c0_tracks", "skipped", "Valid early C0 track receipt")
+        return
+    outputs, rows = _run_track_subset(
+        plan, results, force, ("all_reads",), normalizations, "tracks_c0", "c0_tracks"
+    )
+    normalization_path = outdir / "track_normalization.c0.tsv"
+    _write_normalization(normalization_path, rows)
+    outputs.append(normalization_path)
+    write_receipt("tracks_c0", stage_receipt, signature, outputs, ["rna-ends2tracks", "c0_tracks"])
+    event(logdir, "c0_tracks", "completed",
+          f"Published {len(outputs)} early C0 track and normalization deliverables")
 
 
 def make_tracks(plan: RunPlan, results: Path, dry_run: bool = False, force: bool = False) -> None:
@@ -244,17 +388,30 @@ def make_tracks(plan: RunPlan, results: Path, dry_run: bool = False, force: bool
         enabled_families = [key for key, value in plan.project["tracks"]["families"].items() if value]
         event(logdir, "tracks", "dry_run", "Would generate: " + ", ".join(enabled_families))
         return
-    required = ["samtools", "bedtools"]
-    if plan.project["tracks"]["generate_bigwigs"]:
+    settings = plan.project["tracks"]
+    early_enabled = bool(settings.get("early_c0", True) and settings["families"].get("all_reads", False))
+    if early_enabled:
+        make_c0_tracks(plan, results, False, force)
+    final_families = tuple(
+        family for family, enabled in settings["families"].items()
+        if enabled and not (early_enabled and family == "all_reads")
+    )
+    final_normalizations = tuple(
+        normalization for normalization, enabled in settings["normalizations"].items() if enabled
+    )
+    required: list[str] = []
+    if final_families:
+        required.extend(["samtools", "bedtools"])
+    if final_families and settings["generate_bigwigs"]:
         required.append("bedGraphToBigWig")
-    final_norms = plan.project["tracks"]["normalizations"]
+    final_norms = settings["normalizations"]
     needs_final_factors = (final_norms["deseq2"] or final_norms["robust_cpm"]) and (
-        plan.project["tracks"]["families"]["filtered_ends"] or
-        plan.project["tracks"]["families"]["active_pas"]
+        "filtered_ends" in final_families or "active_pas" in final_families
     )
     if needs_final_factors:
         required.append("Rscript")
-    require_tools(required)
+    if required:
+        require_tools(required)
     if needs_final_factors:
         for genome in plan.references or {plan.reference["assembly"]: plan.reference}:
             if not any(sample["genome"] == genome for sample in plan.samples):
@@ -280,30 +437,46 @@ def make_tracks(plan: RunPlan, results: Path, dry_run: bool = False, force: bool
                     "C4_track_size_factors", factor_receipt, factor_signature, [factor_path],
                     ["rna-ends2tracks", "C4_track_size_factors", genome],
                 )
-    jobs = [
-        (sample["sample_id"], _sample_tracks, (plan, results, sample, force))
+    if final_families:
+        end_outputs, end_rows = _run_track_subset(
+            plan, results, force, final_families, final_normalizations, "tracks_ends", "tracks"
+        )
+    else:
+        end_outputs, end_rows = [], []
+    end_normalization = outdir / "track_normalization.ends.tsv"
+    _write_normalization(end_normalization, end_rows)
+    end_outputs.append(end_normalization)
+    end_receipt = outdir / ".stage_receipts" / "tracks_ends"
+    end_signature_inputs = [
+        outdir / ".receipts" / "tracks_ends" / sample["sample_id"] / "run_receipt.json"
         for sample in plan.samples
+        if final_families
     ]
-    completed = run_bounded_processes(
-        "tracks", jobs, plan.project["resources"]["tracks"]["parallel_jobs"],
-        results / ".checkpoints" / "timings" / "tracks",
-        progress=lambda label, status: event(logdir, "tracks", status, f"Sample worker {label} {status}"),
-    )
-    expected = [path for paths, _ in completed for path in paths]
+    end_signature = signature_for(end_signature_inputs, {
+        "module": "tracks_ends", "families": final_families,
+        "normalizations": final_normalizations, "samples": plan.samples,
+    })
+    write_receipt("tracks_ends", end_receipt, end_signature, end_outputs,
+                  ["rna-ends2tracks", "tracks_ends"])
+    expected = list(end_outputs)
     if needs_final_factors:
         expected.extend(
             results / "04_active_pas" / genome / "C4_track_size_factors.tsv"
             for genome in plan.references
             if any(sample["genome"] == genome for sample in plan.samples)
         )
-    rows = [row for _, normalization in completed for row in normalization]
+    rows: list[dict[str, Any]] = []
+    if early_enabled:
+        c0_receipt = outdir / ".stage_receipts" / "tracks_c0"
+        expected.extend(_receipt_outputs(c0_receipt))
+        rows.extend(_read_normalization(outdir / "track_normalization.c0.tsv"))
+    rows.extend(end_rows)
     normalization_path = outdir / "track_normalization.tsv"
-    with normalization_path.open("w", encoding="utf-8", newline="") as handle:
-        fields = ["sample_id", "genome", "family", "normalization", "denominator", "scale", "count_universe"]
-        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
-        writer.writeheader(); writer.writerows(rows)
+    _write_normalization(normalization_path, rows)
     expected.append(normalization_path)
-    signature_inputs = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples]
+    signature_inputs = [end_receipt / "run_receipt.json"]
+    if early_enabled:
+        signature_inputs.append(outdir / ".stage_receipts" / "tracks_c0" / "run_receipt.json")
     signature = signature_for(signature_inputs, {"module": "tracks", "settings": plan.project["tracks"], "samples": plan.samples})
     write_receipt("tracks", outdir, signature, expected, ["rna-ends2tracks", "tracks"])
     event(logdir, "tracks", "completed", f"Published {len(expected)} track and normalization deliverables")

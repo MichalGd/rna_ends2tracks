@@ -21,6 +21,7 @@ DEFAULTS: dict[str, str] = {
     "APA_B_PILOT_ACCEPTED": "false",
     "APA_B_COMMAND_TEMPLATE": "",
     "RUN_TRACKS": "true",
+    "GENERATE_EARLY_C0_TRACKS": "true",
     "LIBRARY_PROTOCOL": "quantseq_rev_v2_se",
     "LIBRARY_LAYOUT": "single_end",
     "UMI_PRESENT": "false",
@@ -303,6 +304,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         },
         "reporting": {"fdr": _float(values, "FDR"), "min_abs_delta_pau": _float(values, "MIN_ABS_DELTA_PAU")},
         "tracks": {
+            "early_c0": _bool(values, "GENERATE_EARLY_C0_TRACKS"),
             "families": {
                 "all_reads": _bool(values, "GENERATE_ALL_READ_TRACKS"),
                 "exact_ends": _bool(values, "GENERATE_EXACT_END_TRACKS"),
