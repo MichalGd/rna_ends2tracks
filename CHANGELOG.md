@@ -9,6 +9,7 @@
 - Split early C0 raw/CPM tracks from end-derived tracks with independent receipts and one strand-BAM extraction per sample/strand.
 - Report completed/total work, elapsed time, and approximate ETA for bounded lane, sample, track, and contrast pools in the chronological master log.
 - Start raw/CPM C0 tracks as each final sample BAM is published during merging, using only CPU/RAM capacity left after reserving the configured merge pool; defer automatically when no safe overlap capacity remains.
+- Add a real tabular scientific HTML report and machine-readable per-contrast summary covering DGE direction, APA-A sites/shifts/PCPA, optional APA-B, and method concordance; abort reporting if source indexes disagree with result tables.
 
 ## 0.1.0-alpha.9.post2 - 2026-08-27
 

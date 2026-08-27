@@ -675,6 +675,8 @@ The `rnaseq2tracksP` R Markdown report is visually more polished and includes co
 
 Generate one self-contained, navigable HTML report plus machine-readable source tables. The report should be built only after all enabled analytical and enrichment branches finish, then become a cleanup gate.
 
+Implementation checkpoint: `10_reports/contrast_summary.tsv` and the HTML contrast table now recount DGE, APA-A, optional APA-B, differential PCPA, and APA-method concordance directly from their source tables. Reporting fails if a DGE/APA index count disagrees with the corresponding result file. The remaining work in this workstream is QC-funnel aggregation, plots, enrichment sections, richer file links, and interactive sorting/filtering.
+
 Required sections are:
 
 1. executive summary and workflow version;
