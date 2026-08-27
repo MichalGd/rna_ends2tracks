@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rnaends2tracks.conf import ConfError, read_conf
+from rnaends2tracks.conf import ConfError, project_from_conf, read_conf
 from rnaends2tracks.config import ConfigError, build_conf_plan, workflow_requirements
 
 HEADER = "sample_id,description,genome,biological_replicate_id,technical_replicate_id,lane_id,fastq_r1,fastq_r2,condition,batch,subject,library_protocol,library_layout,read_length,kit_catalog,umi_present\n"
@@ -33,6 +33,27 @@ class ConfTests(unittest.TestCase):
             path = Path(temporary) / "config.conf"
             path.write_text("PROJECT_ID=x\nSAMPLESHEET=$(touch bad)\nOUTPUT_DIR=out\n", encoding="utf-8")
             with self.assertRaises(ConfError): read_conf(path)
+
+    def test_ucsc_url_rejects_markdown_and_accepts_plain_http(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.conf"
+            base = "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+            config.write_text(
+                base + "UCSC_BIGDATA_URL_PREFIX=[http://example.test](http://example.test)\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfError, "plain URL"):
+                project_from_conf(config)
+            config.write_text(
+                base + "UCSC_BIGDATA_URL_PREFIX=http://example.test/project\n",
+                encoding="utf-8",
+            )
+            project, _ = project_from_conf(config)
+            self.assertEqual(
+                project["tracks"]["ucsc_bigdata_url_prefix"],
+                "http://example.test/project",
+            )
 
     def test_mixed_genomes_create_only_within_genome_contrasts(self):
         with tempfile.TemporaryDirectory() as temporary:

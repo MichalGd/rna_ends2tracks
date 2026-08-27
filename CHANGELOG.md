@@ -10,6 +10,8 @@
 - Report completed/total work, elapsed time, and approximate ETA for bounded lane, sample, track, and contrast pools in the chronological master log.
 - Start raw/CPM C0 tracks as each final sample BAM is published during merging, using only CPU/RAM capacity left after reserving the configured merge pool; defer automatically when no safe overlap capacity remains.
 - Add a real tabular scientific HTML report and machine-readable per-contrast summary covering DGE direction, APA-A sites/shifts/PCPA, optional APA-B, and method concordance; abort reporting if source indexes disagree with result tables.
+- Generate a one-column BigWig collection inventory, per-collection and combined one-line UCSC custom-track descriptors, distinct collection colors, configurable public URLs/minus-track display, and an IGV session during every report stage.
+- Expand the HTML report with validated samples, STAR mapping, QuantSeq REV orientation, C0-C2R filtering funnels, active-PAS assignment, a searchable contrast table, track collection counts, and direct links to major QC and result indexes.
 
 ## 0.1.0-alpha.9.post2 - 2026-08-27
 

@@ -77,6 +77,9 @@ DEFAULTS: dict[str, str] = {
     "GENERATE_DESEQ2_ROBUST_CPM_FINAL_TRACKS": "true",
     "GENERATE_BIGWIGS": "true",
     "RETAIN_BEDGRAPH": "false",
+    "UCSC_BIGDATA_URL_PREFIX": "",
+    "UCSC_NEGATE_MINUS_TRACKS": "true",
+    "UCSC_VIEW_LIMITS": "0:12",
     "CLEANUP_INTERMEDIATES": "true",
     "KEEP_TRIMMED_FASTQ": "false",
     "KEEP_LANE_BAMS": "false",
@@ -208,6 +211,13 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
     if (_bool(values, "RUN_TRACKS") and not _bool(values, "GENERATE_BIGWIGS")
             and not (_bool(values, "RETAIN_BEDGRAPH") or _bool(values, "KEEP_BEDGRAPHS"))):
         raise ConfError("Track generation requires BigWig and/or retained bedGraph output")
+    ucsc_url = values["UCSC_BIGDATA_URL_PREFIX"].rstrip("/")
+    if any(character in ucsc_url for character in "[]()"):
+        raise ConfError("UCSC_BIGDATA_URL_PREFIX must be a plain URL, not Markdown link syntax")
+    if ucsc_url and not re.match(r"^https?://[^\s]+$", ucsc_url):
+        raise ConfError("UCSC_BIGDATA_URL_PREFIX must be empty or an http(s) URL")
+    if not re.fullmatch(r"-?[0-9]+(?:\.[0-9]+)?:-?[0-9]+(?:\.[0-9]+)?", values["UCSC_VIEW_LIMITS"]):
+        raise ConfError("UCSC_VIEW_LIMITS must have numeric min:max syntax")
     condition_order = [item.strip() for item in values["CONDITION_ORDER"].split(",") if item.strip()]
     if len(condition_order) != len(set(condition_order)):
         raise ConfError("CONDITION_ORDER must not contain duplicate conditions")
@@ -319,6 +329,9 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             },
             "generate_bigwigs": _bool(values, "GENERATE_BIGWIGS"),
             "retain_bedgraph": _bool(values, "RETAIN_BEDGRAPH") or _bool(values, "KEEP_BEDGRAPHS"),
+            "ucsc_bigdata_url_prefix": ucsc_url,
+            "ucsc_negate_minus_tracks": _bool(values, "UCSC_NEGATE_MINUS_TRACKS"),
+            "ucsc_view_limits": values["UCSC_VIEW_LIMITS"],
         },
         "cleanup": {
             "enabled": _bool(values, "CLEANUP_INTERMEDIATES"),

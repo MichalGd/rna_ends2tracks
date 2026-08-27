@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 
 from rnaends2tracks.config import RunPlan
-from rnaends2tracks.report import _contrast_summary, _html_table
+from rnaends2tracks.report import (
+    _browser_assets, _contrast_summary, _exact_funnel_rows, _html_table,
+    _star_qc_rows, _track_collections,
+)
 
 
 def write_tsv(path, fields, rows):
@@ -96,6 +99,82 @@ class ScientificReportTests(unittest.TestCase):
         rendered = _html_table([{"name": "<unsafe>"}], ["name"])
         self.assertIn("&lt;unsafe&gt;", rendered)
         self.assertNotIn("<unsafe>", rendered)
+
+    def test_browser_assets_are_grouped_and_use_one_line_ucsc_syntax(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "results"
+            outdir = results / "10_reports"
+            outdir.mkdir(parents=True)
+            for group in ("all_reads/raw", "active_pas/robust_cpm"):
+                folder = results / "09_tracks" / group
+                folder.mkdir(parents=True)
+                for strand in ("plus", "minus"):
+                    token = group.replace("/", ".")
+                    (folder / f"sample.{token}.transcript_{strand}.bw").write_bytes(b"bw")
+            project = {"tracks": {
+                "ucsc_bigdata_url_prefix": "http://example.test/tracks",
+                "ucsc_negate_minus_tracks": True,
+                "ucsc_view_limits": "0:12",
+            }}
+            plan = RunPlan(project, [], [], [], {}, {})
+
+            outputs, collections = _browser_assets(plan, results, outdir)
+
+            self.assertEqual([row["collection"] for row in collections], [
+                "all_reads/raw", "active_pas/robust_cpm",
+            ])
+            inventory = (outdir / "bigwig_collections.txt").read_text(encoding="utf-8")
+            self.assertIn("[all_reads/raw]", inventory)
+            self.assertNotIn("\t", inventory)
+            combined = (
+                outdir / "ucsc_track_descriptors" / "UCSC_bigWig_tracks.oneline.txt"
+            ).read_text(encoding="utf-8").splitlines()
+            track_lines = [line for line in combined if line.startswith("track ")]
+            self.assertEqual(len(track_lines), 4)
+            self.assertTrue(all(" type=bigWig " in line for line in track_lines))
+            self.assertTrue(all("bigDataUrl=http://example.test/tracks/sample." in line for line in track_lines))
+            self.assertTrue(all("/all_reads/" not in line and "/active_pas/" not in line for line in track_lines))
+            self.assertEqual(sum("negateValues=on" in line for line in track_lines), 2)
+            self.assertTrue(all("viewLimits=0:12" in line for line in track_lines))
+            self.assertIn(outdir / "UCSC_trackDb.txt", outputs)
+
+    def test_track_collection_counts_strands(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary)
+            folder = results / "09_tracks" / "filtered_ends" / "cpm"
+            folder.mkdir(parents=True)
+            (folder / "s1.transcript_plus.bw").write_bytes(b"bw")
+            (folder / "s1.transcript_minus.bw").write_bytes(b"bw")
+            _, rows = _track_collections(results)
+            self.assertEqual(rows[0]["bigwigs"], 2)
+            self.assertEqual(rows[0]["transcript_plus"], 1)
+            self.assertEqual(rows[0]["transcript_minus"], 1)
+
+    def test_qc_sources_are_summarized_without_reinterpreting_counts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary)
+            star = results / "02_alignment" / "S1" / "lanes" / "S1.T01.L001.star.Log.final.out"
+            star.parent.mkdir(parents=True)
+            star.write_text(
+                "Number of input reads | 100\nUniquely mapped reads number | 80\n"
+                "Uniquely mapped reads % | 80.00%\n% of reads mapped to multiple loci | 10.00%\n"
+                "% of reads unmapped: too short | 5.00%\n",
+                encoding="utf-8",
+            )
+            audit = results / "03_exact_ends" / "GRCm39" / "S1" / "end_audit.json"
+            audit.parent.mkdir(parents=True)
+            audit.write_text(
+                '{"sample_id":"S1","genome":"GRCm39","C0":80,"C1":72,'
+                '"C1S":8,"C2":60,"C2R":12,"mask_rescued":3}\n',
+                encoding="utf-8",
+            )
+            star_rows = _star_qc_rows(results)
+            funnel_rows = _exact_funnel_rows(results)
+            self.assertEqual(star_rows[0]["uniquely_mapped_reads"], "80")
+            self.assertEqual(star_rows[0]["uniquely_mapped_pct"], "80.00%")
+            self.assertEqual(funnel_rows[0]["C0"], 80)
+            self.assertEqual(funnel_rows[0]["C1_over_C0_pct"], "90.00")
+            self.assertEqual(funnel_rows[0]["C2_over_C1_pct"], "83.33")
 
 
 if __name__ == "__main__":

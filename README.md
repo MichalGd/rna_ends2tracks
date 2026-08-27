@@ -175,7 +175,9 @@ results/
 
 `CLEANUP_INTERMEDIATES=true` is the default. Cleanup runs only after all enabled deliverable receipts and the report validate. It removes only an explicit allow-list (trimmed FASTQs, lane/all-alignment BAMs, temporary strand BAMs and bedGraphs), writes `provenance/cleanup/cleanup_manifest.tsv`, and preserves final BAMs, count universes, statistics, BigWigs, reports and provenance.
 
-`10_reports/report.html` is the scientific run summary. Its table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; optional APA-B results; and APA-A/APA-B direction concordance. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals.
+`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; optional APA-B results; and APA-A/APA-B direction concordance. It also lists validated samples, all BigWig collections, the main QC/result indexes, and browser assets. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC remains the detailed sequencing/alignment QC report; enrichment and APA-B sections appear only when those modules produce validated inputs.
+
+Every report run also creates `10_reports/bigwig_collections.txt`, a one-column list grouped by track folder, and `10_reports/ucsc_track_descriptors/`, containing one descriptor file per collection plus `UCSC_bigWig_tracks.oneline.txt`. Each BigWig uses one valid UCSC custom-track line, collection-specific color, and optional `negateValues=on` for transcript-minus tracks. Set `UCSC_BIGDATA_URL_PREFIX` to the public directory containing a flat copy of the BigWigs; do not use Markdown link syntax in `config.conf`.
 
 ## Installation
 
