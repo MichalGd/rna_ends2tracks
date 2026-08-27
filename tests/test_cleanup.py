@@ -27,14 +27,14 @@ def _plan() -> RunPlan:
     )
 
 
-def _write_success_receipts(results: Path) -> None:
+def _write_success_receipts(results: Path, workflow_version: str = __version__) -> None:
     for module in REQUIRED:
         module_dir = results / module
         output = module_dir / "final.output"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"complete")
         (module_dir / "run_receipt.json").write_text(json.dumps({
-            "workflow_version": __version__, "exit_status": 0,
+            "workflow_version": workflow_version, "exit_status": 0,
             "outputs": [{
                 "path": str(output.resolve()), "size": output.stat().st_size,
                 "sha256": sha256(output),
@@ -81,6 +81,15 @@ class CleanupTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "successful complete workflow"):
                 clean_intermediates(_plan(), results)
             self.assertTrue(trimmed.is_file())
+
+    def test_hotfix_cleanup_accepts_audited_alpha9_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "project" / "results"
+            trimmed = results / "01_qc" / "trimmed_fastq" / "S1.trimmed.fastq.gz"
+            trimmed.parent.mkdir(parents=True, exist_ok=True); trimmed.write_bytes(b"test")
+            _write_success_receipts(results, workflow_version="0.1.0a9")
+            clean_intermediates(_plan(), results)
+            self.assertFalse(trimmed.exists())
 
     def test_repeated_cleanup_preserves_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:

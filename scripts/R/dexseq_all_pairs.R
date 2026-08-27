@@ -5,6 +5,59 @@ get_arg <- function(name, default=NULL) {
   if (pos == length(args)) stop(paste("Missing value for", name))
   args[[pos + 1]]
 }
+
+dexseq_formulas <- function(design_text) {
+  variables <- all.vars(as.formula(design_text))
+  covariates <- setdiff(variables, "condition")
+  covariate_interactions <- if (length(covariates)) paste0(covariates, ":exon") else character(0)
+  full_terms <- c(covariate_interactions, "condition:exon")
+  full_formula <- as.formula(paste("~ sample + exon +", paste(full_terms, collapse=" + ")))
+  reduced_formula <- if (length(covariate_interactions)) {
+    as.formula(paste("~ sample + exon +", paste(covariate_interactions, collapse=" + ")))
+  } else as.formula("~ sample + exon")
+  list(
+    variables=variables,
+    covariates=covariates,
+    full=full_formula,
+    reduced=reduced_formula
+  )
+}
+
+tabular_dexseq_result <- function(result) {
+  list_columns <- vapply(result, is.list, logical(1))
+  if (any(list_columns)) {
+    message(
+      "Dropping non-tabular DEXSeq result columns: ",
+      paste(colnames(result)[list_columns], collapse=", ")
+    )
+    result <- result[, !list_columns, drop=FALSE]
+  }
+  result
+}
+
+if ("--self-test" %in% args) {
+  unpaired <- dexseq_formulas("~ condition")
+  stopifnot(
+    paste(deparse(unpaired$full), collapse=" ") == "~sample + exon + condition:exon",
+    paste(deparse(unpaired$reduced), collapse=" ") == "~sample + exon"
+  )
+  paired <- dexseq_formulas("~ subject + condition")
+  stopifnot(
+    paste(deparse(paired$full), collapse=" ") == "~sample + exon + subject:exon + condition:exon",
+    paste(deparse(paired$reduced), collapse=" ") == "~sample + exon + subject:exon"
+  )
+  fixture <- data.frame(featureID=c("p1", "p2"), padj=c(0.01, 0.20), stringsAsFactors=FALSE)
+  fixture$genomicData <- I(list(list(chr="chr1"), list(chr="chr2")))
+  clean <- tabular_dexseq_result(fixture)
+  stopifnot(identical(colnames(clean), c("featureID", "padj")))
+  target <- tempfile(fileext=".tsv")
+  write.table(clean, target, sep="\t", quote=FALSE, row.names=FALSE)
+  stopifnot(file.exists(target), nrow(read.delim(target, check.names=FALSE)) == 2)
+  unlink(target)
+  cat("DEXSeq paired/unpaired formula and serialization self-test: PASS\n")
+  quit(save="no", status=0)
+}
+
 suppressPackageStartupMessages(library(DEXSeq))
 
 counts_df <- read.delim(get_arg("--counts"), check.names=FALSE, stringsAsFactors=FALSE)
@@ -49,18 +102,15 @@ for (i in seq_len(nrow(contrasts))) {
   rownames(sample_data) <- sample_data$sample_id
   sample_data$condition <- relevel(factor(sample_data$condition), ref=con$denominator)
   design_text <- if ("resolved_design" %in% colnames(contrasts) && nzchar(con$resolved_design)) con$resolved_design else default_design_text
-  variables <- all.vars(as.formula(design_text))
+  formulas <- dexseq_formulas(design_text)
+  variables <- formulas$variables
   missing <- setdiff(variables, colnames(sample_data))
   if (length(missing)) stop(paste("Design columns missing for", con$contrast_id, paste(missing, collapse=", ")))
   for (variable in variables) sample_data[[variable]] <- factor(sample_data[[variable]])
   design_matrix <- model.matrix(as.formula(design_text), data=sample_data)
   if (qr(design_matrix)$rank < ncol(design_matrix)) stop(paste("Pair-specific design is not full rank:", con$contrast_id))
-  covariates <- setdiff(variables, "condition")
-  interaction_terms <- c(paste0(covariates, ":exon"), "condition:exon")
-  full_formula <- as.formula(paste("~ sample + exon +", paste(interaction_terms, collapse=" + ")))
-  reduced_formula <- if (length(covariates)) {
-    as.formula(paste("~ sample + exon +", paste0(covariates, ":exon", collapse=" + ")))
-  } else as.formula("~ sample + exon")
+  full_formula <- formulas$full
+  reduced_formula <- formulas$reduced
 
   eligible <- catalog$assignment_status == "unique" & nzchar(catalog$gene_id)
   first_count <- table(catalog$gene_id[eligible])
@@ -77,7 +127,7 @@ for (i in seq_len(nrow(contrasts))) {
   dxd <- estimateDispersions(dxd)
   dxd <- testForDEU(dxd, reducedModel=reduced_formula)
   dxd <- estimateExonFoldChanges(dxd, fitExpToVar="condition")
-  result <- as.data.frame(DEXSeqResults(dxd))
+  result <- tabular_dexseq_result(as.data.frame(DEXSeqResults(dxd)))
   result$pas_id <- result$featureID
   norm <- counts(dxd, normalized=TRUE)
   den <- rowMeans(norm[, sample_data$condition == con$denominator, drop=FALSE])

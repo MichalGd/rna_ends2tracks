@@ -50,6 +50,8 @@ jobs:
           files <- list.files("scripts/R", pattern="[.]R$", full.names=TRUE)
           stopifnot(length(files) == 4L)
           invisible(lapply(files, parse))
+      - name: DEXSeq formula and serialization regression
+        run: Rscript scripts/R/dexseq_all_pairs.R --self-test
 
   repository-contracts:
     runs-on: ubuntu-latest

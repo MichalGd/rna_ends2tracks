@@ -6,10 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import __version__
 from .config import RunPlan, signature_for, workflow_requirements
 from .external import event
-from .receipts import receipt_valid, sha256, write_receipt
+from .receipts import receipt_valid, sha256, workflow_version_compatible, write_receipt
 
 
 def _safe_results_root(results: Path) -> Path:
@@ -27,7 +26,7 @@ def _successful_receipt(module_dir: Path) -> bool:
         receipt: dict[str, Any] = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    if receipt.get("workflow_version") != __version__ or receipt.get("exit_status") != 0:
+    if not workflow_version_compatible(receipt.get("workflow_version")) or receipt.get("exit_status") != 0:
         return False
     outputs = receipt.get("outputs")
     if not isinstance(outputs, list) or not outputs:
