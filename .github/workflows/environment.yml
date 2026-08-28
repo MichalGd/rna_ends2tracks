@@ -64,6 +64,7 @@ jobs:
           python -m pip install --no-deps .
           python -m unittest discover -s tests -p 'test_*.py' -v
           Rscript tests/R/deseq2_pairing_smoke.R
+          Rscript scripts/R/drimseq_stager_all_pairs.R --self-test
 
   apa-b-environment:
     runs-on: ubuntu-latest

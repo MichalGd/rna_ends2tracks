@@ -65,6 +65,8 @@ nice -n 10 "$MAMBA" --no-rc env create --prefix "$ENV_PREFIX" --file environment
   'files <- list.files("scripts/R", pattern="[.]R$", full.names=TRUE); stopifnot(length(files) >= 6L); invisible(lapply(files, parse))'
 "$MAMBA" run -p "$ENV_PREFIX" Rscript scripts/R/dexseq_all_pairs.R --self-test \
   2>&1 | tee "$INSTALL_AUDIT/r-dexseq-hotfix-smoke.log"
+"$MAMBA" run -p "$ENV_PREFIX" Rscript scripts/R/drimseq_stager_all_pairs.R --self-test \
+  2>&1 | tee "$INSTALL_AUDIT/r-drimseq-stager-na-smoke.log"
 "$MAMBA" run -p "$ENV_PREFIX" Rscript tests/R/deseq2_pairing_smoke.R \
   2>&1 | tee "$INSTALL_AUDIT/r-deseq2-smoke.log"
 "$ENV_PREFIX/bin/rna-ends2tracks" --version

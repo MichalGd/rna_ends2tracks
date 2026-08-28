@@ -13,6 +13,13 @@ from .receipts import receipt_valid, write_receipt
 from .statistics import run_r_contrasts
 
 REQUIRED_CATALOG = {"pas_id", "gene_id", "chrom", "start", "end", "strand", "feature_class"}
+REQUIRED_NA_AUDIT = {
+    "status", "screening_tests", "screening_na", "screening_na_fraction",
+    "confirmation_tests", "confirmation_na", "confirmation_na_fraction",
+    "excluded_genes_fewer_than_two_testable_sites", "stageR_input_genes",
+    "stageR_input_sites", "stageR_adjusted_na", "stageR_adjusted_na_fraction",
+    "na_policy",
+}
 
 
 def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
@@ -118,6 +125,54 @@ def _validate_polyaseqtrap_outputs(catalog: Path, counts: Path, deepip: Path, sa
                     raise RuntimeError(f"Non-integer APA-B count at line {line_number}, sample {sample_id}") from exc
                 if value < 0:
                     raise RuntimeError(f"Negative APA-B count at line {line_number}, sample {sample_id}")
+
+
+def _validate_na_audit(path: Path) -> None:
+    if not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError(f"APA-B contrast NA audit is unavailable: {path}")
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    if len(rows) != 1 or not REQUIRED_NA_AUDIT.issubset(rows[0]):
+        raise RuntimeError(f"APA-B contrast NA audit has an invalid schema: {path}")
+    row = rows[0]
+    if row["status"] not in {"PASS", "WARN_UNTESTABLE_PVALUES"}:
+        raise RuntimeError(f"APA-B contrast NA audit has an invalid status: {path}")
+    integer_fields = (
+        "screening_tests", "screening_na", "confirmation_tests", "confirmation_na",
+        "excluded_genes_fewer_than_two_testable_sites", "stageR_input_genes",
+        "stageR_input_sites", "stageR_adjusted_na",
+    )
+    fraction_fields = (
+        "screening_na_fraction", "confirmation_na_fraction", "stageR_adjusted_na_fraction",
+    )
+    try:
+        integers = {field: int(row[field]) for field in integer_fields}
+        fractions = {field: float(row[field]) for field in fraction_fields}
+    except ValueError as exc:
+        raise RuntimeError(f"APA-B contrast NA audit contains a non-numeric value: {path}") from exc
+    if any(value < 0 for value in integers.values()):
+        raise RuntimeError(f"APA-B contrast NA audit contains a negative count: {path}")
+    if any(not 0 <= value <= 1 for value in fractions.values()):
+        raise RuntimeError(f"APA-B contrast NA audit contains an invalid fraction: {path}")
+    if (integers["screening_na"] > integers["screening_tests"]
+            or integers["confirmation_na"] > integers["confirmation_tests"]
+            or integers["stageR_input_genes"] > integers["screening_tests"]
+            or integers["stageR_input_sites"] > integers["confirmation_tests"]
+            or integers["stageR_adjusted_na"] > integers["confirmation_tests"]):
+        raise RuntimeError(f"APA-B contrast NA audit contains inconsistent counts: {path}")
+    if integers["screening_tests"] == 0 or integers["confirmation_tests"] == 0:
+        raise RuntimeError(f"APA-B contrast NA audit reports no DRIMSeq tests: {path}")
+    expected_fractions = {
+        "screening_na_fraction": integers["screening_na"] / integers["screening_tests"],
+        "confirmation_na_fraction": integers["confirmation_na"] / integers["confirmation_tests"],
+        "stageR_adjusted_na_fraction": integers["stageR_adjusted_na"] / integers["confirmation_tests"],
+    }
+    if any(abs(fractions[field] - expected) > 1e-9 for field, expected in expected_fractions.items()):
+        raise RuntimeError(f"APA-B contrast NA audit contains inconsistent fractions: {path}")
+    if integers["stageR_input_genes"] == 0 or integers["stageR_input_sites"] == 0:
+        raise RuntimeError(f"APA-B contrast NA audit reports no testable stageR hypotheses: {path}")
+    if row["na_policy"] != "untestable hypotheses remain NA and cannot be significant":
+        raise RuntimeError(f"APA-B contrast NA audit reports an unsupported NA policy: {path}")
 
 
 def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False, force: bool = False) -> None:
@@ -240,7 +295,10 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
             receipt_root=stats_dir / ".receipts", index_path=index,
             parallel_jobs=plan.project["resources"]["apa_b"]["contrast_parallel_jobs"],
             threads=1, memory_gb=plan.project["resources"]["apa_b"]["contrast_memory_gb"],
-            output_suffixes=[".drimseq_stager.tsv", ".gene_screen.tsv", ".gene_apa_summary.tsv"],
+            output_suffixes=[
+                ".drimseq_stager.tsv", ".gene_screen.tsv", ".gene_apa_summary.tsv",
+                ".na_audit.tsv",
+            ],
             signature_inputs=[counts, catalog], signature_parameters={
                 "genome": genome, "design": plan.project["design"],
                 "reporting": plan.project["reporting"], "settings": settings,
@@ -259,9 +317,10 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         ])
         with index.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
+                _validate_na_audit(Path(row["na_audit_file"]))
                 outputs.extend([
                     Path(row["result_file"]), Path(row["gene_screen_file"]),
-                    Path(row["gene_summary_file"]),
+                    Path(row["gene_summary_file"]), Path(row["na_audit_file"]),
                 ])
     if dry_run:
         event(log_dir, "apa_b", "dry_run", "Would run independent genome-specific APA-B and DRIMSeq/stageR")
