@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
+import hashlib
 import json
 import subprocess
 import sys
@@ -16,6 +18,7 @@ from .polyaseqtrap_adapter import (
     environment_executable,
     extract_end_counts,
     r_subprocess_environment,
+    reuse_exact_end_counts,
     verify_installation,
 )
 
@@ -99,6 +102,41 @@ def execute(args: argparse.Namespace) -> int:
                 for row in _rows(ends)}
     expected = {("chrPilot", 349, "+"): 2, ("chrPilot", 700, "-"): 1}
 
+    # Prove that the optimized production path reconstructs precisely the same
+    # raw endpoint universe from receipt-validated C1 + C1S, never from C2.
+    reusable = work / "receipt_validated_exact_ends"
+    reusable.mkdir(exist_ok=True)
+    c1 = reusable / "C1_exact_ends.tsv.gz"
+    c1s = reusable / "C1S_uncertain_ends.tsv.gz"
+    with gzip.open(c1, "wt", encoding="utf-8") as handle:
+        handle.write("chrom\tstart\tend\tstrand\tcount\nchrPilot\t349\t350\t+\t2\n")
+    with gzip.open(c1s, "wt", encoding="utf-8") as handle:
+        handle.write("chrom\tstart\tend\tstrand\tcount\nchrPilot\t700\t701\t-\t1\n")
+    end_audit = reusable / "end_audit.json"
+    end_audit.write_text(json.dumps({
+        "sample_id": "pilot", "C0": 3, "C1": 2, "C1S": 1,
+        "duplicate_flagged": 1, "duplicate_flagged_C0": 1,
+    }), encoding="utf-8")
+    receipt_dir = reusable / ".receipt"
+    receipt_dir.mkdir(exist_ok=True)
+    receipt_outputs = []
+    for path in (c1, c1s, end_audit):
+        receipt_outputs.append({
+            "path": str(path.resolve()), "size": path.stat().st_size,
+            "validation": "sha256", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+    receipt = receipt_dir / "run_receipt.json"
+    receipt.write_text(json.dumps({
+        "module": "exact_ends_sample", "exit_status": 0, "outputs": receipt_outputs,
+    }), encoding="utf-8")
+    reused_ends = work / "reused_exact_end_counts.tsv"
+    reuse_audit = reuse_exact_end_counts({
+        "sample_id": "pilot", "c1": str(c1), "c1s": str(c1s),
+        "exact_end_audit": str(end_audit), "exact_end_receipt": str(receipt),
+    }, reused_ends)
+    reused = {(row["chrom"], int(row["position"]), row["strand"]): int(row["count"])
+              for row in _rows(reused_ends)}
+
     clustered = work / "polyaseqtrap_candidates.tsv"
     cluster_audit = work / "polyaseqtrap_audit.tsv"
     r_script = workflow_asset("scripts/R/polyaseqtrap_quantseq_rev.R")
@@ -114,6 +152,8 @@ def execute(args: argparse.Namespace) -> int:
     gene_id, feature = annotate_site("chrPilot", "+", 349, genes, bins)
     evidence = {
         "coordinate_and_strand": observed == expected,
+        "c1_c1s_reuse_equivalent": reused == observed == expected
+        and reuse_audit["records_written"] == extraction["records_written"],
         "record_count_conserved": (
             extraction["eligible_records"] == extraction["records_written"] == clustered_counts == 3
         ),
@@ -124,7 +164,8 @@ def execute(args: argparse.Namespace) -> int:
         **_deepip_truth(deepip_script, model, work),
     }
     required = (
-        "coordinate_and_strand", "record_count_conserved", "duplicate_flagged_records_retained",
+        "coordinate_and_strand", "c1_c1s_reuse_equivalent", "record_count_conserved",
+        "duplicate_flagged_records_retained",
         "deepip_artifact_rejected", "deepip_true_pas_retained", "intragenic_site_retained",
     )
     evidence["status"] = "PASS" if all(evidence[key] is True for key in required) else "FAIL"

@@ -24,6 +24,8 @@ sum(C3) <= sum(C2)
 C4 = gene-wise sums of uniquely assigned C3
 ```
 
+APA-B post4 may reuse receipt-validated C1 and C1S as an execution optimization. It adds the two tables back together, verifies the recorded `C0 = C1 + C1S` identity and source receipt, and therefore reconstructs the same raw endpoint universe that its BAM reader would produce. The exact-end audit also records the duplicate-flagged C0 count; reads remain retained because this is a no-UMI workflow. This does not reuse C2, active PAS, gene assignments, or APA-A statistics; PolyAseqTrap/DeepIP discovery remains an independent method.
+
 C3 can be smaller than C2 because filtered ends outside the discovered active-PAS intervals are not assigned to C3. Ambiguous, antisense, and unassigned C3 sites can remain in catalogs and tracks but are excluded from C4.
 
 C5 has no arithmetic equality with C4. The two matrices answer different questions: C4 counts reads at accepted active PAS, whereas C5 counts conventional annotated-exon overlaps. A large C4/C5 difference is reported for review, not automatically corrected by replacing one matrix with the other.

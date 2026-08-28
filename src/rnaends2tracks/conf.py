@@ -21,8 +21,12 @@ DEFAULTS: dict[str, str] = {
     "APA_B_PILOT_ACCEPTED": "false",
     "APA_B_COMMAND_TEMPLATE": "auto",
     "APA_B_VALIDATION_MANIFEST": "",
-    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post3/installation_manifest.json",
+    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post4/installation_manifest.json",
     "APA_B_THREADS": "8",
+    "APA_B_ENDPOINT_SOURCE": "auto",
+    "APA_B_ENDPOINT_PARALLEL_JOBS": "8",
+    "APA_B_CLUSTER_PARALLEL_JOBS": "8",
+    "APA_B_DEEPIP_THREADS": "8",
     "RUN_DGE_ENRICHMENT": "true",
     "RUN_APA_ENRICHMENT": "true",
     "ENRICHMENT_ORA": "true",
@@ -224,6 +228,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "AMBIGUOUS_GENE_POLICY": {"exclude_statistics"},
         "PAS_MASK_RESCUE_TIER": {"core", "core_plus_rescue"},
         "PAS_DISCOVERY_THRESHOLD_OPERATOR": {"greater_than"},
+        "APA_B_ENDPOINT_SOURCE": {"auto", "exact_ends", "bam"},
     }.items():
         if values[key].lower() not in accepted:
             raise ConfError(f"Unsupported {key}: {values[key]}")
@@ -239,6 +244,11 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         raise ConfError("RUN_APA_B=true requires APA_B_VALIDATION_MANIFEST")
     if _bool(values, "RUN_APA_B") and not values["APA_B_INSTALLATION_MANIFEST"].strip():
         raise ConfError("RUN_APA_B=true requires APA_B_INSTALLATION_MANIFEST")
+    apa_b_threads = _int(values, "APA_B_THREADS")
+    for key in ("APA_B_ENDPOINT_PARALLEL_JOBS", "APA_B_CLUSTER_PARALLEL_JOBS", "APA_B_DEEPIP_THREADS"):
+        value = _int(values, key)
+        if value < 1 or value > apa_b_threads:
+            raise ConfError(f"{key} must be between 1 and APA_B_THREADS ({apa_b_threads})")
     if _bool(values, "ENRICHMENT_KEGG"):
         raise ConfError("ENRICHMENT_KEGG=true is not implemented in alpha.10; use GO, Reactome, or Hallmark")
     if not (_bool(values, "ENRICHMENT_ORA") or _bool(values, "ENRICHMENT_GSEA")):
@@ -355,6 +365,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "command_template": values["APA_B_COMMAND_TEMPLATE"],
             "validation_manifest": _path(values["APA_B_VALIDATION_MANIFEST"], base),
             "installation_manifest": _path(values["APA_B_INSTALLATION_MANIFEST"], base),
+            "endpoint_source": values["APA_B_ENDPOINT_SOURCE"].lower(),
         },
         "reporting": {"fdr": _float(values, "FDR"), "min_abs_delta_pau": _float(values, "MIN_ABS_DELTA_PAU")},
         "enrichment": {
@@ -413,6 +424,9 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
                       "extraction_memory_gb": 4, "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"),
                       "contrast_threads": 1, "contrast_memory_gb": 16},
             "apa_b": {"engine_threads": _int(values, "APA_B_THREADS"), "engine_memory_gb": 24,
+                      "endpoint_parallel_jobs": _int(values, "APA_B_ENDPOINT_PARALLEL_JOBS"),
+                      "cluster_parallel_jobs": _int(values, "APA_B_CLUSTER_PARALLEL_JOBS"),
+                      "deepip_threads": _int(values, "APA_B_DEEPIP_THREADS"), "sample_memory_gb": 4,
                       "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"), "contrast_threads": 1,
                       "contrast_memory_gb": 16},
             "enrichment": {"parallel_jobs": _int(values, "ENRICHMENT_PARALLEL_JOBS"),

@@ -13,6 +13,7 @@ def _accepted_synthetic(path: Path) -> None:
     required = {
         "status": "PASS",
         "coordinate_and_strand": True,
+        "c1_c1s_reuse_equivalent": True,
         "record_count_conserved": True,
         "duplicate_flagged_records_retained": True,
         "deepip_artifact_rejected": True,
@@ -55,6 +56,7 @@ def execute(args: argparse.Namespace) -> int:
     payload = {
         "schema_version": 1,
         "status": "accepted",
+        "workflow_adapter": installation["workflow_adapter"],
         "engine": installation["engine"],
         "deepip": {"source_commit": installation["deepip"]["source_commit"]},
         "models": {species: {"name": "DeepIP", "sha256": record["sha256"]}
@@ -67,7 +69,11 @@ def execute(args: argparse.Namespace) -> int:
         "umi_present": False,
         "coordinate_deduplication": False,
         "quantseq_rev_adaptation": "genomewide_no_tail_weighted_PAC",
-        "pilot": {"synthetic_pass": True, "real_quantseq_rev_canaries": canaries},
+        "pilot": {
+            "synthetic_pass": True,
+            "c1_c1s_reuse_equivalent": True,
+            "real_quantseq_rev_canaries": canaries,
+        },
         "reviewed_by": args.reviewed_by,
         "accepted_at": datetime.now(timezone.utc).isoformat(),
     }

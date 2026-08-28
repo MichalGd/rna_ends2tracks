@@ -28,6 +28,11 @@ class ProcessExecutionTests(unittest.TestCase):
         tracks = [row for row in rows if row["stage"] == "tracks"]
         self.assertEqual({row["work_unit"] for row in tracks}, {"c0_sample", "end_sample"})
         self.assertTrue(all(row["executor"] == "python_process_and_external_process" for row in tracks))
+        apa_b = [row for row in rows if row["stage"] == "apa_b"]
+        self.assertEqual(
+            {row["work_unit"] for row in apa_b},
+            {"endpoint_preparation", "polyaseqtrap_cluster", "deepip", "contrast"},
+        )
 
     def test_process_pool_preserves_order_and_records_worker_pids(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -68,6 +68,22 @@ class ConfTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfError, "APA_B_VALIDATION_MANIFEST"):
                 project_from_conf(config)
 
+    def test_apa_b_parallel_controls_are_bounded_by_engine_threads(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); config = root / "config.conf"
+            base = "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+            config.write_text(base + "APA_B_THREADS=8\nAPA_B_CLUSTER_PARALLEL_JOBS=9\n", encoding="utf-8")
+            with self.assertRaisesRegex(ConfError, "APA_B_CLUSTER_PARALLEL_JOBS"):
+                project_from_conf(config)
+            config.write_text(
+                base + "APA_B_THREADS=12\nAPA_B_ENDPOINT_SOURCE=exact_ends\n"
+                "APA_B_ENDPOINT_PARALLEL_JOBS=6\nAPA_B_CLUSTER_PARALLEL_JOBS=8\nAPA_B_DEEPIP_THREADS=12\n",
+                encoding="utf-8",
+            )
+            project, _ = project_from_conf(config)
+            self.assertEqual(project["apa_b"]["endpoint_source"], "exact_ends")
+            self.assertEqual(project["resources"]["apa_b"]["cluster_parallel_jobs"], 8)
+
     def test_mixed_genomes_create_only_within_genome_contrasts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

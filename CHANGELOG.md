@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.10.post4 - 2026-08-28
+
+- Reconstruct APA-B's unchanged raw endpoint universe from receipt-validated C1+C1S tables by default, avoiding a second full scan of every BAM while never reusing APA-A-specific C2 filtering.
+- Retain an explicit BAM fallback and enforce C0=C1+C1S, source-receipt checksum, duplicate-retention, soft-clip, and endpoint-count invariants.
+- Split endpoint preparation, PolyAseqTrap clustering, and DeepIP concurrency controls; use process-based endpoint preparation and bounded external R workers.
+- Add resumable per-sample endpoint/clustering checkpoints plus live completed/total and ETA messages to the main engine log.
+- Bound TensorFlow/BLAS CPU threads explicitly and record each sample's endpoint source in engine provenance.
+- Pin the workflow-adapter commit in installation/acceptance provenance and require a new C1+C1S equivalence pilot.
+
 ## 0.1.0-alpha.10.post3 - 2026-08-28
 
 - Resolve `Rscript` from the same immutable APA-B environment as the running adapter instead of relying on the caller's `PATH`.

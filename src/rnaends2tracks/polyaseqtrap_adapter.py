@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import hashlib
 import json
 import os
@@ -9,8 +10,9 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,8 +85,11 @@ def verify_manifests(installation: dict[str, object], accepted: dict[str, object
         raise RuntimeError("APA-B validation does not cover QuantSeq REV V2 single-end libraries")
     pilot = accepted.get("pilot", {})
     if (not isinstance(pilot, dict) or pilot.get("synthetic_pass") is not True
+            or pilot.get("c1_c1s_reuse_equivalent") is not True
             or pilot.get("real_quantseq_rev_canaries", {}).get(assembly) != "PASS"):
-        raise RuntimeError(f"APA-B validation lacks passing synthetic and {assembly} real canaries")
+        raise RuntimeError(
+            f"APA-B validation lacks endpoint-reuse equivalence, synthetic, or {assembly} real canaries"
+        )
     if accepted.get("quantseq_rev_adaptation") != "genomewide_no_tail_weighted_PAC":
         raise RuntimeError("APA-B validation covers a different QuantSeq REV adaptation")
     if not str(accepted.get("reviewed_by", "")).strip() or not str(accepted.get("accepted_at", "")).strip():
@@ -96,6 +101,8 @@ def verify_manifests(installation: dict[str, object], accepted: dict[str, object
     expected_model = accepted.get("models", {}).get(species, accepted.get("model", {})) \
         if isinstance(accepted.get("models", {}), dict) else accepted.get("model", {})
     checks = (
+        (installation.get("workflow_adapter", {}).get("source_commit"),
+         accepted.get("workflow_adapter", {}).get("source_commit"), "workflow adapter commit"),
         (engine.get("source_commit"), accepted.get("engine", {}).get("source_commit"), "engine commit"),
         (model.get("sha256"), expected_model.get("sha256"), f"{species} DeepIP model"),
         (environment.get("sha256"), accepted.get("environment", {}).get("sha256"), "environment lock"),
@@ -108,10 +115,15 @@ def verify_manifests(installation: dict[str, object], accepted: dict[str, object
 
 def verify_installation(installation: dict[str, object], species: str) -> tuple[Path, Path, str]:
     """Verify immutable engine/model assets without asserting scientific acceptance."""
+    workflow_adapter = installation.get("workflow_adapter", {})
     engine = installation.get("engine", {})
     models = installation.get("models", {})
     model = models.get(species, {}) if isinstance(models, dict) else {}
     environment = installation.get("environment", {})
+    if (not isinstance(workflow_adapter, dict)
+            or not str(workflow_adapter.get("release", "")).strip()
+            or not re.fullmatch(r"[0-9a-fA-F]{7,40}", str(workflow_adapter.get("source_commit", "")))):
+        raise RuntimeError("Installed APA-B workflow-adapter release/commit pin is missing or invalid")
     if engine.get("source_commit") != POLYASEQTRAP_COMMIT:
         raise RuntimeError("Installed PolyAseqTrap commit differs from the workflow pin")
     if installation.get("deepip", {}).get("source_commit") != DEEPIP_COMMIT:
@@ -157,12 +169,12 @@ def extract_end_counts(source: Path, target: Path) -> dict[str, int]:
             "distinct_exact_end_coordinates": len(counts)}
 
 
-def _run(command: list[str], log: Path) -> None:
+def _run(command: list[str], log: Path, environment: dict[str, str] | None = None) -> None:
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("w", encoding="utf-8") as handle:
         handle.write("COMMAND: " + subprocess.list2cmdline(command) + "\n")
         handle.flush()
-        subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, check=True)
+        subprocess.run(command, env=environment, stdout=handle, stderr=subprocess.STDOUT, check=True)
 
 
 def environment_executable(name: str) -> str:
@@ -184,7 +196,166 @@ def r_subprocess_environment() -> dict[str, str]:
         environment.pop(variable, None)
     environment_bin = str(Path(sys.executable).resolve().parent)
     environment["PATH"] = environment_bin + os.pathsep + environment.get("PATH", "")
+    # Parallelism is across samples. Keep each R worker single-threaded so its
+    # BLAS/OpenMP runtime cannot silently oversubscribe the global CPU budget.
+    environment.update({
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "BLIS_NUM_THREADS": "1",
+    })
     return environment
+
+
+def _file_signature(paths: list[Path], parameters: dict[str, object]) -> str:
+    digest = hashlib.sha256(json.dumps(parameters, sort_keys=True).encode())
+    for path in sorted(paths, key=lambda value: str(value)):
+        stat = path.stat()
+        digest.update(f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+    return digest.hexdigest()
+
+
+def _checkpoint_valid(path: Path, signature: str, outputs: list[Path]) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if payload.get("schema_version") != 1 or payload.get("signature") != signature:
+        return None
+    records = payload.get("outputs", [])
+    if not isinstance(records, list) or len(records) != len(outputs):
+        return None
+    observed = {str(output.resolve()): output for output in outputs}
+    for record in records:
+        if not isinstance(record, dict) or str(record.get("path", "")) not in observed:
+            return None
+        output = observed[str(record["path"])]
+        if not output.is_file():
+            return None
+        stat = output.stat()
+        if stat.st_size != record.get("size") or stat.st_mtime_ns != record.get("mtime_ns"):
+            return None
+    metadata = payload.get("metadata", {})
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _write_checkpoint(path: Path, signature: str, outputs: list[Path], metadata: dict[str, object]) -> None:
+    payload = {
+        "schema_version": 1,
+        "signature": signature,
+        "outputs": [
+            {"path": str(output.resolve()), "size": output.stat().st_size,
+             "mtime_ns": output.stat().st_mtime_ns}
+            for output in outputs
+        ],
+        "metadata": metadata,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _validate_source_receipt(receipt_path: Path, required: list[Path]) -> None:
+    receipt = _load_json(receipt_path, "exact-end sample receipt")
+    if receipt.get("module") != "exact_ends_sample" or receipt.get("exit_status") != 0:
+        raise RuntimeError(f"Exact-end receipt is not successful: {receipt_path}")
+    records = {
+        str(Path(str(record.get("path", ""))).resolve()): record
+        for record in receipt.get("outputs", []) if isinstance(record, dict)
+    }
+    for path in required:
+        resolved = str(path.resolve())
+        record = records.get(resolved)
+        if record is None:
+            raise RuntimeError(f"Exact-end receipt does not cover reusable input: {path}")
+        stat = path.stat()
+        if stat.st_size != record.get("size"):
+            raise RuntimeError(f"Reusable exact-end input changed size after receipt: {path}")
+        if record.get("validation") == "sha256":
+            if sha256(path) != record.get("sha256"):
+                raise RuntimeError(f"Reusable exact-end input failed checksum validation: {path}")
+        elif stat.st_mtime_ns != record.get("mtime_ns"):
+            raise RuntimeError(f"Reusable exact-end input changed after receipt: {path}")
+
+
+def _read_position_counts(path: Path) -> dict[tuple[str, str, int], int]:
+    counts: dict[tuple[str, str, int], int] = defaultdict(int)
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
+        for line, row in enumerate(csv.DictReader(handle, delimiter="\t"), start=2):
+            try:
+                chrom = row["chrom"]
+                strand = row["strand"]
+                position = int(row.get("start", row.get("position", "")))
+                count = int(row["count"])
+            except (KeyError, ValueError) as exc:
+                raise RuntimeError(f"Invalid reusable endpoint at {path}:{line}") from exc
+            if strand not in {"+", "-"} or count < 1:
+                raise RuntimeError(f"Invalid reusable endpoint at {path}:{line}")
+            counts[(chrom, strand, position)] += count
+    return counts
+
+
+def reuse_exact_end_counts(row: dict[str, str], target: Path) -> dict[str, object]:
+    """Reconstruct the adapter's raw endpoint universe from validated C1+C1S."""
+    c1 = Path(row["c1"])
+    c1s = Path(row["c1s"])
+    audit_path = Path(row["exact_end_audit"])
+    receipt_path = Path(row["exact_end_receipt"])
+    required = [c1, c1s, audit_path]
+    missing = [str(path) for path in [*required, receipt_path] if not path.is_file()]
+    if missing:
+        raise RuntimeError("Reusable exact-end inputs are incomplete: " + ", ".join(missing))
+    _validate_source_receipt(receipt_path, required)
+    audit = _load_json(audit_path, "exact-end sample audit")
+    c1_counts = _read_position_counts(c1)
+    c1s_counts = _read_position_counts(c1s)
+    observed_c1 = sum(c1_counts.values())
+    observed_c1s = sum(c1s_counts.values())
+    if (int(audit.get("C1", -1)) != observed_c1
+            or int(audit.get("C1S", -1)) != observed_c1s
+            or int(audit.get("C0", -1)) != observed_c1 + observed_c1s):
+        raise RuntimeError(f"C0=C1+C1S reuse invariant failed for {row['sample_id']}")
+    combined: dict[tuple[str, str, int], int] = defaultdict(int)
+    for source in (c1_counts, c1s_counts):
+        for key, count in source.items():
+            combined[key] += count
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(["chrom", "position", "strand", "count"])
+        for (chrom, strand, position), count in sorted(combined.items()):
+            writer.writerow([chrom, position, strand, count])
+    total = observed_c1 + observed_c1s
+    return {
+        "records_read": total,
+        "eligible_records": total,
+        "records_written": total,
+        "duplicate_flagged_records_retained": int(
+            audit.get("duplicate_flagged_C0", audit.get("duplicate_flagged", 0))
+        ),
+        "duplicate_flagged_count_scope": (
+            "C0" if "duplicate_flagged_C0" in audit else "legacy_all_alignment_records"
+        ),
+        "end_soft_clipped_records_included": observed_c1s,
+        "distinct_exact_end_coordinates": len(combined),
+        "endpoint_source": "receipt_validated_C1_plus_C1S",
+    }
+
+
+def _prepare_endpoint_job(row: dict[str, str], target: Path, source_mode: str) -> tuple[str, dict[str, object]]:
+    reusable_paths = [Path(row.get(key, "")) for key in ("c1", "c1s", "exact_end_audit", "exact_end_receipt")]
+    reusable = all(str(path) and path.is_file() for path in reusable_paths)
+    partial = any(str(path) and path.is_file() for path in reusable_paths)
+    if source_mode == "exact_ends" and not reusable:
+        raise RuntimeError(f"APA-B exact-end reuse was required but is unavailable for {row['sample_id']}")
+    if source_mode != "bam" and reusable:
+        audit = reuse_exact_end_counts(row, target)
+    elif source_mode == "auto" and partial:
+        raise RuntimeError(f"APA-B found incomplete reusable exact-end inputs for {row['sample_id']}")
+    else:
+        audit = {**extract_end_counts(Path(row["bam"]), target), "endpoint_source": "bam_fallback"}
+    return row["sample_id"], audit
 
 
 def _truth(value: object) -> bool:
@@ -264,7 +435,7 @@ def _a_rich(sequence: str | None) -> bool:
 
 
 def deepip_filter(candidates: list[Candidate], fasta_path: Path, work: Path, script: Path,
-                  model: Path) -> tuple[list[Candidate], list[dict[str, object]]]:
+                  model: Path, threads: int = 1) -> tuple[list[Candidate], list[dict[str, object]]]:
     fasta_file = work / "deepip_candidates.fa"
     pending: dict[str, Candidate] = {}
     audit: list[dict[str, object]] = []
@@ -294,9 +465,16 @@ def deepip_filter(candidates: list[Candidate], fasta_path: Path, work: Path, scr
     predictions: dict[str, tuple[int, str]] = {}
     if pending:
         output = work / "deepip_predictions.csv"
+        runtime = os.environ.copy()
+        runtime.update({
+            "OMP_NUM_THREADS": str(max(1, threads)),
+            "MKL_NUM_THREADS": str(max(1, threads)),
+            "TF_NUM_INTRAOP_THREADS": str(max(1, threads)),
+            "TF_NUM_INTEROP_THREADS": str(max(1, min(2, threads))),
+        })
         _run([sys.executable, str(script), "-testSeq", str(fasta_file),
               "-trainedModel", str(model), "-outputFile", str(output)],
-             work / "deepip.log")
+             work / "deepip.log", environment=runtime)
         predictions = parse_deepip(output, set(pending))
     retained = {id(candidate): candidate for candidate in candidates}
     for identifier, candidate in pending.items():
@@ -393,17 +571,69 @@ def execute(args: argparse.Namespace) -> int:
     if len(samples) != len(set(samples)) or not samples:
         raise RuntimeError("BAM manifest requires unique non-empty sample_id values")
     r_script = workflow_asset("scripts/R/polyaseqtrap_quantseq_rev.R")
-    audits: dict[str, dict[str, int]] = {}
-
-    def process(row: dict[str, str]) -> tuple[str, Path]:
+    audits: dict[str, dict[str, object]] = {}
+    endpoint_paths: dict[str, Path] = {}
+    endpoint_jobs: list[tuple[dict[str, str], Path, str, Path]] = []
+    endpoint_started = time.monotonic()
+    for row in rows:
         sample = row["sample_id"]
         sample_work = work / sample
         ends = sample_work / "exact_end_counts.tsv"
-        audits[sample] = extract_end_counts(Path(row["bam"]), ends)
+        endpoint_paths[sample] = ends
+        if args.endpoint_source == "bam":
+            sources = [Path(row["bam"])]
+        else:
+            reusable = [Path(row.get(key, "")) for key in ("c1", "c1s", "exact_end_audit", "exact_end_receipt")]
+            sources = reusable if all(path.is_file() for path in reusable) else [Path(row["bam"])]
+        signature = _file_signature(sources, {
+            "stage": "endpoint", "sample": sample, "source_mode": args.endpoint_source,
+            "adapter": "genomewide_no_tail_weighted_PAC",
+        })
+        checkpoint = sample_work / "endpoint_checkpoint.json"
+        metadata = _checkpoint_valid(checkpoint, signature, [ends])
+        if metadata is not None:
+            audits[sample] = metadata
+            print(f"APA-B endpoint {sample} reused", flush=True)
+        else:
+            endpoint_jobs.append((row, ends, signature, checkpoint))
+
+    endpoint_workers = max(1, min(int(args.endpoint_workers or args.threads), len(endpoint_jobs) or 1))
+    completed_endpoints = len(rows) - len(endpoint_jobs)
+    if endpoint_jobs:
+        with ProcessPoolExecutor(max_workers=endpoint_workers) as pool:
+            futures = {
+                pool.submit(_prepare_endpoint_job, row, ends, args.endpoint_source):
+                    (row["sample_id"], ends, signature, checkpoint)
+                for row, ends, signature, checkpoint in endpoint_jobs
+            }
+            for future in as_completed(futures):
+                sample, ends, signature, checkpoint = futures[future]
+                _sample, audit = future.result()
+                audits[sample] = audit
+                _write_checkpoint(checkpoint, signature, [ends], audit)
+                completed_endpoints += 1
+                elapsed = time.monotonic() - endpoint_started
+                eta = elapsed / completed_endpoints * (len(rows) - completed_endpoints)
+                print(
+                    f"APA-B endpoint {sample} completed ({completed_endpoints}/{len(rows)}); "
+                    f"elapsed={elapsed:.0f}s; ETA~{eta:.0f}s",
+                    flush=True,
+                )
+
+    def cluster_sample(row: dict[str, str], ends: Path) -> tuple[str, Path, Path, str]:
+        sample = row["sample_id"]
+        sample_work = work / sample
         output = sample_work / "polyaseqtrap_candidates.tsv"
+        audit_output = sample_work / "polyaseqtrap_audit.tsv"
+        signature = _file_signature([ends, Path(args.fasta), r_script], {
+            "stage": "polyaseqtrap_cluster", "sample": sample, "cluster_gap": args.cluster_gap,
+        })
+        checkpoint = sample_work / "cluster_checkpoint.json"
+        if _checkpoint_valid(checkpoint, signature, [output, audit_output]) is not None:
+            return sample, output, checkpoint, signature
         command = [environment_executable("Rscript"), str(r_script), "--ends", str(ends),
                    "--fasta", str(Path(args.fasta).resolve()), "--output", str(output),
-                   "--audit", str(sample_work / "polyaseqtrap_audit.tsv"),
+                   "--audit", str(audit_output),
                    "--cluster-gap", str(args.cluster_gap)]
         log = sample_work / "polyaseqtrap.log"
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -412,24 +642,41 @@ def execute(args: argparse.Namespace) -> int:
             handle.flush()
             subprocess.run(command, env=r_subprocess_environment(), stdout=handle,
                            stderr=subprocess.STDOUT, check=True)
-        return sample, output
+        _write_checkpoint(checkpoint, signature, [output, audit_output], {"sample_id": sample})
+        return sample, output, checkpoint, signature
 
     candidate_rows: list[Candidate] = []
-    workers = max(1, min(int(args.threads), len(rows)))
+    workers = max(1, min(int(args.cluster_workers or args.threads), len(rows)))
+    cluster_started = time.monotonic()
+    completed_clusters = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(process, row) for row in rows]
+        futures = [pool.submit(cluster_sample, row, endpoint_paths[row["sample_id"]]) for row in rows]
         for future in as_completed(futures):
-            sample, path = future.result()
+            sample, path, _checkpoint, _signature = future.result()
             candidate_rows.extend(read_candidates(path, sample))
+            completed_clusters += 1
+            elapsed = time.monotonic() - cluster_started
+            eta = elapsed / completed_clusters * (len(rows) - completed_clusters)
+            print(
+                f"APA-B PolyAseqTrap {sample} completed ({completed_clusters}/{len(rows)}); "
+                f"elapsed={elapsed:.0f}s; ETA~{eta:.0f}s",
+                flush=True,
+            )
     candidates = [row for row in cluster_candidates(candidate_rows, args.cluster_gap)
                   if row.total >= args.min_reads and row.samples >= args.min_samples]
     if not candidates:
         raise RuntimeError("PolyAseqTrap weighted clustering produced no project-supported PAS")
-    candidates, deepip_audit = deepip_filter(candidates, Path(args.fasta), work, deepip_script, model)
+    print(f"APA-B DeepIP started for {len(candidates)} supported candidates", flush=True)
+    candidates, deepip_audit = deepip_filter(
+        candidates, Path(args.fasta), work, deepip_script, model,
+        threads=int(args.deepip_threads or args.threads),
+    )
+    print(f"APA-B DeepIP completed; {len(candidates)} candidates retained", flush=True)
     if not candidates:
         raise RuntimeError("DeepIP rejected every project-supported APA-B candidate")
     provenance = {
         "adapter": "rna_ends2tracks PolyAseqTrap/DeepIP QuantSeq REV genome-wide adapter v1",
+        "workflow_adapter": installation.get("workflow_adapter", {}),
         "assembly": args.assembly, "species": args.species,
         "engine": {"name": "PolyAseqTrap", "source_commit": POLYASEQTRAP_COMMIT},
         "deepip": {"source_commit": DEEPIP_COMMIT},
@@ -440,6 +687,7 @@ def execute(args: argparse.Namespace) -> int:
         "duplicate_flagged_records_retained": sum(row["duplicate_flagged_records_retained"] for row in audits.values()),
         "input_records": sum(row["records_read"] for row in audits.values()),
         "endpoint_assigned_records": sum(row["records_written"] for row in audits.values()),
+        "endpoint_sources": {sample: row.get("endpoint_source", "unknown") for sample, row in audits.items()},
         "quantseq_rev_adaptation": (
             "genome-wide transcript 3-prime endpoints; PolyAseqTrap simpleCluster weighted PAC clustering; "
             "species-specific DeepIP; no FindPTA tail-priority call because QuantSeq REV does not retain tails"
@@ -461,6 +709,13 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--assembly", required=True, choices=["GRCh38", "GRCm39"])
     value.add_argument("--outdir", required=True)
     value.add_argument("--threads", type=int, default=1)
+    value.add_argument("--endpoint-workers", type=int, default=0,
+                       help="Parallel endpoint preparation processes; 0 uses --threads")
+    value.add_argument("--cluster-workers", type=int, default=0,
+                       help="Parallel PolyAseqTrap sample processes; 0 uses --threads")
+    value.add_argument("--deepip-threads", type=int, default=0,
+                       help="CPU threads exposed to DeepIP/TensorFlow; 0 uses --threads")
+    value.add_argument("--endpoint-source", choices=["auto", "exact_ends", "bam"], default="auto")
     value.add_argument("--validation-manifest", default="")
     value.add_argument(
         "--pilot-mode", action="store_true",

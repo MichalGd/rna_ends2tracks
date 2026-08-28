@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "status": "DRAFT_NOT_ACCEPTED",
+  "workflow_adapter": {
+    "release": "v0.1.0-alpha.10.post4",
+    "source_commit": "REPLACE_WITH_PINNED_COMMIT"
+  },
   "engine": {
     "name": "PolyAseqTrap",
     "source_commit": "REPLACE_WITH_PINNED_COMMIT"
@@ -19,6 +23,7 @@
   "quantseq_rev_adaptation": "genomewide_no_tail_weighted_PAC",
   "pilot": {
     "synthetic_pass": false,
+    "c1_c1s_reuse_equivalent": false,
     "real_quantseq_rev_canaries": {
       "GRCh38": "NOT_RUN",
       "GRCm39": "NOT_RUN"
