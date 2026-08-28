@@ -13,7 +13,9 @@ from .apa_a import annotate_site, load_genes
 from .paths import workflow_asset
 from .polyaseqtrap_adapter import (
     _load_json,
+    environment_executable,
     extract_end_counts,
+    r_subprocess_environment,
     verify_installation,
 )
 
@@ -102,9 +104,9 @@ def execute(args: argparse.Namespace) -> int:
     r_script = workflow_asset("scripts/R/polyaseqtrap_quantseq_rev.R")
     with (work / "polyaseqtrap.log").open("w", encoding="utf-8") as handle:
         subprocess.run(
-            ["Rscript", str(r_script), "--ends", str(ends), "--fasta", str(fasta),
+            [environment_executable("Rscript"), str(r_script), "--ends", str(ends), "--fasta", str(fasta),
              "--output", str(clustered), "--audit", str(cluster_audit), "--cluster-gap", "24"],
-            stdout=handle, stderr=subprocess.STDOUT, check=True,
+            env=r_subprocess_environment(), stdout=handle, stderr=subprocess.STDOUT, check=True,
         )
     clustered_rows = _rows(clustered)
     clustered_counts = sum(int(row["count"]) for row in clustered_rows)
