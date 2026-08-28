@@ -99,7 +99,7 @@ At the time of this record, the complete-environment GitHub job and the server-s
 3. Install the separate APA-B environment on the server:
 
    ```bash
-   bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10
+   bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post1
    ```
 
 4. Run the synthetic pilot, verifying coordinate, strand, count, clustering, and DeepIP invariants.
@@ -113,4 +113,3 @@ At the time of this record, the complete-environment GitHub job and the server-s
 - APA-A/APA-B agreement increases confidence but is not a substitute for orthogonal validation.
 - DeepIP model applicability and classification behavior must be evaluated separately for each supported organism and reference build.
 - PolyAseqTrap is GPL-3.0. The DeepIP repository did not expose an unambiguous redistribution license during implementation review, so institutional approval or author clarification is required before redistributing its code or model files.
-

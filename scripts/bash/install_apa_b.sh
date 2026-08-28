@@ -35,6 +35,15 @@ export MAMBA_ROOT_PREFIX
 MAMBA_CHANNEL_PRIORITY=strict nice -n 10 "$MAMBA" --no-rc env create \
   --prefix "$PREFIX" --file "$SOURCE_DIR/workflow/environment.apa_b.yml"
 
+"$MAMBA" run -p "$PREFIX" python -c '
+import keras
+import tensorflow as tf
+assert keras.__version__ == "2.10.0", keras.__version__
+assert tf.__version__ == "2.10.1", tf.__version__
+assert not tf.config.list_physical_devices("GPU")
+print("DeepIP TensorFlow CPU runtime: PASS")
+'
+
 mkdir -p "$PREFIX/share/rna_ends2tracks-apa-b/sources"
 git clone https://github.com/APAexplorer/PolyAseqTrap.git "$SOURCE_DIR/PolyAseqTrap"
 git -C "$SOURCE_DIR/PolyAseqTrap" checkout --detach "$POLYASEQTRAP_COMMIT"
