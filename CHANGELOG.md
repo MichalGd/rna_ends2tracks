@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.10.post5 - 2026-08-28
+
+- Allow subset NA p-values from DRIMSeq to remain explicitly untestable during stageR adjustment instead of aborting every APA-B contrast.
+- Exclude genes without a finite screening p-value and at least two finite PAS confirmation tests from stageR while preserving their output rows as `NA` and never significant.
+- Record and validate a per-contrast APA-B NA audit covering screening, confirmation, stageR input, and adjusted-result counts.
+
 ## 0.1.0-alpha.10.post4 - 2026-08-28
 
 - Reconstruct APA-B's unchanged raw endpoint universe from receipt-validated C1+C1S tables by default, avoiding a second full scan of every BAM while never reusing APA-A-specific C2 filtering.

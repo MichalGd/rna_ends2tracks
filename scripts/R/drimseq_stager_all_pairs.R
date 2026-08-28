@@ -4,6 +4,130 @@ get_arg <- function(name, default=NULL) {
   if (pos == length(args)) stop(paste("Missing value for", name)); args[[pos + 1]]
 }
 suppressPackageStartupMessages({library(DRIMSeq); library(stageR)})
+
+stagewise_with_na_policy <- function(gene_result, feature_result, alpha) {
+  gene_ids <- as.character(gene_result$gene_id)
+  feature_ids <- as.character(feature_result$feature_id)
+  feature_gene_ids <- as.character(feature_result$gene_id)
+  gene_pvalues <- as.numeric(gene_result$pvalue)
+  feature_pvalues <- as.numeric(feature_result$pvalue)
+
+  if (anyDuplicated(gene_ids)) stop("DRIMSeq returned duplicate gene IDs")
+  if (anyDuplicated(feature_ids)) stop("DRIMSeq returned duplicate feature IDs")
+  invalid_gene <- !is.na(gene_pvalues) & (!is.finite(gene_pvalues) | gene_pvalues < 0 | gene_pvalues > 1)
+  invalid_feature <- !is.na(feature_pvalues) & (!is.finite(feature_pvalues) | feature_pvalues < 0 | feature_pvalues > 1)
+  if (any(invalid_gene) || any(invalid_feature)) {
+    stop("DRIMSeq returned finite p-values outside [0,1]")
+  }
+
+  screen_testable <- !is.na(gene_pvalues) & is.finite(gene_pvalues)
+  confirmation_testable <- !is.na(feature_pvalues) & is.finite(feature_pvalues)
+  finite_screen_genes <- gene_ids[screen_testable]
+  testable_per_gene <- table(feature_gene_ids[
+    confirmation_testable & feature_gene_ids %in% finite_screen_genes
+  ])
+  eligible_genes <- names(testable_per_gene)[testable_per_gene >= 2]
+  eligible_features <- confirmation_testable & feature_gene_ids %in% eligible_genes
+  eligible_screen <- screen_testable & gene_ids %in% eligible_genes
+
+  if (!any(eligible_screen) || !any(eligible_features)) {
+    stop("No genes with a finite screening p-value and at least two finite PAS confirmation p-values")
+  }
+
+  p_screen <- gene_pvalues[eligible_screen]
+  names(p_screen) <- gene_ids[eligible_screen]
+  p_confirmation <- matrix(
+    feature_pvalues[eligible_features], ncol=1,
+    dimnames=list(feature_ids[eligible_features], "site")
+  )
+  tx2gene <- data.frame(
+    txID=feature_ids[eligible_features],
+    geneID=feature_gene_ids[eligible_features],
+    stringsAsFactors=FALSE
+  )
+  staged <- stageRTx(
+    pScreen=p_screen, pConfirmation=p_confirmation,
+    pScreenAdjusted=FALSE, tx2gene=tx2gene
+  )
+  staged <- stageWiseAdjustment(staged, method="dtu", alpha=alpha, allowNA=TRUE)
+  adjusted <- as.data.frame(
+    getAdjustedPValues(staged, order=FALSE, onlySignificantGenes=FALSE)
+  )
+  id_column <- intersect(c("txID", "feature_id"), colnames(adjusted))
+  adjusted_ids <- if (length(id_column)) as.character(adjusted[[id_column[1]]]) else rownames(adjusted)
+  value_column <- intersect(
+    c("transcript", "feature", "site", "adjusted_pvalue", "padj"),
+    colnames(adjusted)
+  )
+  if (!length(value_column)) stop("stageR returned no feature-level adjusted-p-value column")
+  adjusted_locations <- match(adjusted_ids, feature_ids)
+  if (anyNA(adjusted_locations)) stop("stageR returned an unknown feature ID")
+  stage_adjusted <- rep(NA_real_, length(feature_ids))
+  names(stage_adjusted) <- feature_ids
+  stage_adjusted[adjusted_locations] <- as.numeric(adjusted[[value_column[1]]])
+
+  fraction <- function(numerator, denominator) {
+    if (denominator) numerator / denominator else NA_real_
+  }
+  screen_na <- sum(!screen_testable)
+  confirmation_na <- sum(!confirmation_testable)
+  excluded_lt2 <- sum(screen_testable & !gene_ids %in% eligible_genes)
+  adjusted_na <- sum(is.na(stage_adjusted))
+  audit <- data.frame(
+    status=ifelse(screen_na + confirmation_na + excluded_lt2 > 0, "WARN_UNTESTABLE_PVALUES", "PASS"),
+    screening_tests=length(gene_pvalues),
+    screening_na=screen_na,
+    screening_na_fraction=fraction(screen_na, length(gene_pvalues)),
+    confirmation_tests=length(feature_pvalues),
+    confirmation_na=confirmation_na,
+    confirmation_na_fraction=fraction(confirmation_na, length(feature_pvalues)),
+    excluded_genes_fewer_than_two_testable_sites=excluded_lt2,
+    stageR_input_genes=length(p_screen),
+    stageR_input_sites=nrow(p_confirmation),
+    stageR_adjusted_na=adjusted_na,
+    stageR_adjusted_na_fraction=fraction(adjusted_na, length(stage_adjusted)),
+    na_policy="untestable hypotheses remain NA and cannot be significant",
+    stringsAsFactors=FALSE
+  )
+  if (audit$status != "PASS") {
+    warning(sprintf(
+      paste0(
+        "Retaining untestable hypotheses as NA: screening=%d/%d; ",
+        "confirmation=%d/%d; genes_with_fewer_than_two_testable_sites=%d"
+      ),
+      screen_na, length(gene_pvalues), confirmation_na, length(feature_pvalues), excluded_lt2
+    ))
+  }
+  list(adjusted=unname(stage_adjusted), audit=audit)
+}
+
+if ("--self-test" %in% args) {
+  self_gene <- data.frame(
+    gene_id=c("g1", "g2", "g3", "g4"),
+    pvalue=c(1e-8, NA_real_, 0.2, 0.9),
+    stringsAsFactors=FALSE
+  )
+  self_feature <- data.frame(
+    feature_id=paste0("f", 1:8),
+    gene_id=rep(c("g1", "g2", "g3", "g4"), each=2),
+    pvalue=c(1e-6, 0.2, 0.4, 0.5, 0.3, NA_real_, 0.8, 0.9),
+    stringsAsFactors=FALSE
+  )
+  self <- suppressWarnings(stagewise_with_na_policy(self_gene, self_feature, 0.05))
+  stopifnot(
+    length(self$adjusted) == nrow(self_feature),
+    all(is.na(self$adjusted[3:6])),
+    self$audit$screening_na == 1,
+    self$audit$confirmation_na == 1,
+    self$audit$excluded_genes_fewer_than_two_testable_sites == 1,
+    self$audit$stageR_input_genes == 2,
+    self$audit$stageR_input_sites == 4,
+    identical(self$audit$status, "WARN_UNTESTABLE_PVALUES")
+  )
+  cat("DRIMSeq/stageR NA-policy self-test: PASS\n")
+  quit(save="no", status=0)
+}
+
 counts_wide <- read.delim(get_arg("--counts"), check.names=FALSE, stringsAsFactors=FALSE)
 catalog <- read.delim(get_arg("--catalog"), check.names=FALSE, stringsAsFactors=FALSE)
 samples_all <- read.delim(get_arg("--samples"), check.names=FALSE, stringsAsFactors=FALSE)
@@ -53,18 +177,8 @@ for (i in seq_len(nrow(contrasts))) {
   d <- dmPrecision(d, design=design); d <- dmFit(d, design=design); d <- dmTest(d, coef=condition_coef)
   gene_result <- DRIMSeq::results(d, level="gene"); feature_result <- DRIMSeq::results(d, level="feature")
   gene_result$gene_padj <- p.adjust(gene_result$pvalue, method="BH")
-  p_screen <- gene_result$pvalue; names(p_screen) <- gene_result$gene_id
-  p_confirmation <- matrix(feature_result$pvalue, ncol=1,
-                           dimnames=list(feature_result$feature_id, "site"))
-  tx2gene <- feature_result[, c("feature_id", "gene_id"), drop=FALSE]
-  colnames(tx2gene) <- c("txID", "geneID")
-  staged <- stageRTx(pScreen=p_screen, pConfirmation=p_confirmation, pScreenAdjusted=FALSE, tx2gene=tx2gene)
-  staged <- stageWiseAdjustment(staged, method="dtu", alpha=alpha)
-  adjusted <- as.data.frame(getAdjustedPValues(staged, order=FALSE, onlySignificantGenes=FALSE))
-  id_column <- intersect(c("txID", "transcript", "feature_id"), colnames(adjusted))
-  adjusted_ids <- if (length(id_column)) adjusted[[id_column[1]]] else rownames(adjusted)
-  p_columns <- setdiff(colnames(adjusted), c("txID", "geneID", "transcript", "gene", "feature_id"))
-  feature_result$stageR_adjusted <- adjusted[[tail(p_columns, 1)]][match(feature_result$feature_id, adjusted_ids)]
+  stagewise <- stagewise_with_na_policy(gene_result, feature_result, alpha)
+  feature_result$stageR_adjusted <- stagewise$adjusted
   den <- rowMeans(mat[, samples$condition == con$denominator, drop=FALSE])
   num <- rowMeans(mat[, samples$condition == con$numerator, drop=FALSE])
   den_total <- ave(den, gene_ids, FUN=sum); num_total <- ave(num, gene_ids, FUN=sum)
@@ -96,13 +210,19 @@ for (i in seq_len(nrow(contrasts))) {
   }))
   target <- file.path(outdir, paste0(con$contrast_id, ".drimseq_stager.tsv"))
   gene_target <- file.path(outdir, paste0(con$contrast_id, ".gene_apa_summary.tsv"))
+  na_audit_target <- file.path(outdir, paste0(con$contrast_id, ".na_audit.tsv"))
   write.table(feature_result, target, sep="\t", quote=FALSE, row.names=FALSE)
   gene_screen_target <- file.path(outdir, paste0(con$contrast_id, ".gene_screen.tsv"))
   write.table(gene_result, gene_screen_target, sep="\t", quote=FALSE, row.names=FALSE)
   write.table(gene_summary, gene_target, sep="\t", quote=FALSE, row.names=FALSE)
+  write.table(stagewise$audit, na_audit_target, sep="\t", quote=FALSE, row.names=FALSE)
   index[[length(index)+1]] <- data.frame(
     contrast_id=con$contrast_id, result_file=target, tested_sites=nrow(feature_result),
     gene_screen_file=gene_screen_target, gene_summary_file=gene_target,
+    na_audit_file=na_audit_target,
+    screening_na=stagewise$audit$screening_na,
+    confirmation_na=stagewise$audit$confirmation_na,
+    na_audit_status=stagewise$audit$status,
     confirmed_sites=sum(!is.na(feature_result$stageR_adjusted) & feature_result$stageR_adjusted < alpha),
     design_mode=if ("design_mode" %in% colnames(contrasts)) con$design_mode else "legacy",
     resolved_design=design_text,

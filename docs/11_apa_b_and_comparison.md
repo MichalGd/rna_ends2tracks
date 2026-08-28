@@ -14,3 +14,9 @@ The two PAS catalogs are never combined. `08_apa_comparison/` matches nearby sit
 - proximity between method-specific coordinates.
 
 Agreement is supportive evidence, not a replacement for inspecting read coverage, replicate consistency, gene structure, and internal-priming evidence. See [the installation and pilot contract](POLYASEQTRAP_ADAPTER_CONTRACT.md) for exact pins, commands, outputs, and limitations.
+
+## Untestable DRIMSeq/stageR hypotheses
+
+DRIMSeq can legitimately return `NA` p-values for genes or PAS whose usage hypothesis cannot be estimated from the available counts. APA-B does not convert these values to zero, one, or statistical significance. Before stageR adjustment, it retains only genes with a finite screening p-value and at least two PAS with finite confirmation p-values. Excluded hypotheses remain `NA` in the complete result table. The supported stageR `allowNA=TRUE` policy is also enabled defensively.
+
+Each contrast writes `<contrast>.na_audit.tsv`. This records the total and `NA` screening and confirmation tests, the numbers of genes and sites admitted to stageR, and the number of adjusted `NA` values. It also records the fixed policy `untestable hypotheses remain NA and cannot be significant`. A contrast with no testable stageR hypotheses fails with an actionable error instead of producing an empty success result.
