@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TAG=""
-PREFIX="/opt/conda_envs/rna_ends2tracks-apa-b-v1"
+PREFIX=""
 MAMBA="/opt/miniconda/condabin/mamba"
 MAMBA_ROOT_PREFIX="/opt/conda_envs/.mamba-rna_ends2tracks-apa-b"
 
@@ -18,6 +18,11 @@ while (($#)); do
   esac
 done
 [[ -n "$TAG" ]] || { echo "--tag is required" >&2; exit 2; }
+if [[ -z "$PREFIX" ]]; then
+  VERSION="${TAG#v}"
+  ENV_TOKEN="${VERSION/-alpha./a}"
+  PREFIX="/opt/conda_envs/rna_ends2tracks-apa-b-${ENV_TOKEN}"
+fi
 [[ ! -e "$PREFIX" ]] || { echo "Target already exists: $PREFIX" >&2; exit 2; }
 
 POLYASEQTRAP_COMMIT="176ea2884ff1c6be7c64bc44fa7661d82d90e718"
@@ -83,6 +88,7 @@ open(path,"w",encoding="utf-8").write(json.dumps(payload,indent=2,sort_keys=True
 
 "$PREFIX/bin/Rscript" -e 'library(PolyAseqTrap); library(Rsamtools); cat("PolyAseqTrap/Rsamtools: PASS\n")'
 "$PREFIX/bin/rna-ends2tracks-apa-b" --help >/dev/null
+"$PREFIX/bin/rna-ends2tracks-run-apa-b-synthetic-pilot" --help >/dev/null
 chmod -R a-w "$PREFIX"
 find "$PREFIX" ! -type l -perm /222 -print -quit | grep -q . && {
   echo "Writable content remains in APA-B environment" >&2; exit 1;

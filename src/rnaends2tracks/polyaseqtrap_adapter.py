@@ -89,6 +89,7 @@ def verify_manifests(installation: dict[str, object], accepted: dict[str, object
         raise RuntimeError("APA-B validation covers a different QuantSeq REV adaptation")
     if not str(accepted.get("reviewed_by", "")).strip() or not str(accepted.get("accepted_at", "")).strip():
         raise RuntimeError("APA-B validation lacks reviewer or acceptance timestamp")
+    model_path, deepip_script, environment_hash = verify_installation(installation, species)
     engine = installation.get("engine", {})
     model = installation.get("models", {}).get(species, {}) if isinstance(installation.get("models"), dict) else {}
     environment = installation.get("environment", {})
@@ -102,6 +103,15 @@ def verify_manifests(installation: dict[str, object], accepted: dict[str, object
     for observed, expected, label in checks:
         if not expected or str(observed).lower() != str(expected).lower():
             raise RuntimeError(f"Installed APA-B {label} does not match the accepted pilot")
+    return model_path, deepip_script, environment_hash
+
+
+def verify_installation(installation: dict[str, object], species: str) -> tuple[Path, Path, str]:
+    """Verify immutable engine/model assets without asserting scientific acceptance."""
+    engine = installation.get("engine", {})
+    models = installation.get("models", {})
+    model = models.get(species, {}) if isinstance(models, dict) else {}
+    environment = installation.get("environment", {})
     if engine.get("source_commit") != POLYASEQTRAP_COMMIT:
         raise RuntimeError("Installed PolyAseqTrap commit differs from the workflow pin")
     if installation.get("deepip", {}).get("source_commit") != DEEPIP_COMMIT:
@@ -112,7 +122,10 @@ def verify_manifests(installation: dict[str, object], accepted: dict[str, object
         raise RuntimeError(f"Pinned {species} DeepIP model is missing or has the wrong checksum")
     if not deepip_script.is_file():
         raise RuntimeError(f"Pinned DeepIP script is unavailable: {deepip_script}")
-    return model_path, deepip_script, str(environment.get("sha256"))
+    environment_hash = str(environment.get("sha256", ""))
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", environment_hash):
+        raise RuntimeError("Installed APA-B environment lock checksum is missing or invalid")
+    return model_path, deepip_script, environment_hash
 
 
 def extract_end_counts(source: Path, target: Path) -> dict[str, int]:
@@ -345,8 +358,13 @@ def execute(args: argparse.Namespace) -> int:
     work = outdir / "adapter_work"
     work.mkdir(parents=True, exist_ok=True)
     installation = _load_json(Path(args.installation_manifest), "APA-B installation manifest")
-    accepted = _load_json(Path(args.validation_manifest), "APA-B validation manifest")
-    model, deepip_script, environment_hash = verify_manifests(installation, accepted, args.species, args.assembly)
+    if args.pilot_mode:
+        model, deepip_script, environment_hash = verify_installation(installation, args.species)
+    else:
+        accepted = _load_json(Path(args.validation_manifest), "APA-B validation manifest")
+        model, deepip_script, environment_hash = verify_manifests(
+            installation, accepted, args.species, args.assembly
+        )
     with Path(args.bam_manifest).open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
     samples = [row["sample_id"] for row in rows]
@@ -387,6 +405,7 @@ def execute(args: argparse.Namespace) -> int:
         "deepip": {"source_commit": DEEPIP_COMMIT},
         "model": {"name": "DeepIP", "sha256": DEEPIP_MODEL_SHA256[args.species]},
         "environment": {"sha256": environment_hash},
+        "pilot_mode": bool(args.pilot_mode),
         "umi_present": False, "coordinate_deduplication": False,
         "duplicate_flagged_records_retained": sum(row["duplicate_flagged_records_retained"] for row in audits.values()),
         "input_records": sum(row["records_read"] for row in audits.values()),
@@ -412,7 +431,11 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--assembly", required=True, choices=["GRCh38", "GRCm39"])
     value.add_argument("--outdir", required=True)
     value.add_argument("--threads", type=int, default=1)
-    value.add_argument("--validation-manifest", required=True)
+    value.add_argument("--validation-manifest", default="")
+    value.add_argument(
+        "--pilot-mode", action="store_true",
+        help="Run a validation canary from a verified installation before an acceptance manifest exists",
+    )
     value.add_argument("--installation-manifest", default=os.environ.get("RNA_ENDS2TRACKS_APA_B_INSTALLATION_MANIFEST", ""))
     value.add_argument("--cluster-gap", type=int, default=24)
     value.add_argument("--min-reads", type=int, default=5)
@@ -425,6 +448,8 @@ def main() -> None:
     args = parser().parse_args()
     if not args.installation_manifest:
         raise SystemExit("--installation-manifest or RNA_ENDS2TRACKS_APA_B_INSTALLATION_MANIFEST is required")
+    if not args.pilot_mode and not args.validation_manifest:
+        raise SystemExit("--validation-manifest is required unless --pilot-mode is used")
     raise SystemExit(execute(args))
 
 
