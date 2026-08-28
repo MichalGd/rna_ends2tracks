@@ -12,6 +12,7 @@ def accepted_manifest():
         "engine": {"name": "PolyAseqTrap adapter", "source_commit": "1234567"},
         "model": {"sha256": "a" * 64}, "environment": {"sha256": "b" * 64},
         "umi_present": False, "coordinate_deduplication": False,
+        "quantseq_rev_adaptation": "genomewide_no_tail_weighted_PAC",
         "library_protocols": ["quantseq_rev_v2_se"], "assemblies": ["GRCh38", "GRCm39"],
         "pilot": {"synthetic_pass": True,
                   "real_quantseq_rev_canaries": {"GRCh38": "PASS", "GRCm39": "PASS"}},

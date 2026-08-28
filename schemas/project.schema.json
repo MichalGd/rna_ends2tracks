@@ -45,7 +45,9 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "pilot_accepted": {"type": "boolean"},
-        "command_template": {"type": "string"}
+        "command_template": {"type": "string"},
+        "installation_manifest": {"type": "string"},
+        "validation_manifest": {"type": "string"}
       }
     }
   }

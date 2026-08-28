@@ -19,8 +19,9 @@ DEFAULTS: dict[str, str] = {
     "RUN_APA_A_MCELL2019": "true",
     "RUN_APA_B": "false",
     "APA_B_PILOT_ACCEPTED": "false",
-    "APA_B_COMMAND_TEMPLATE": "",
+    "APA_B_COMMAND_TEMPLATE": "auto",
     "APA_B_VALIDATION_MANIFEST": "",
+    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-v1/installation_manifest.json",
     "APA_B_THREADS": "8",
     "RUN_DGE_ENRICHMENT": "true",
     "RUN_APA_ENRICHMENT": "true",
@@ -236,6 +237,8 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         raise ConfError("RUN_APA_B=true requires APA_B_COMMAND_TEMPLATE")
     if _bool(values, "RUN_APA_B") and not values["APA_B_VALIDATION_MANIFEST"].strip():
         raise ConfError("RUN_APA_B=true requires APA_B_VALIDATION_MANIFEST")
+    if _bool(values, "RUN_APA_B") and not values["APA_B_INSTALLATION_MANIFEST"].strip():
+        raise ConfError("RUN_APA_B=true requires APA_B_INSTALLATION_MANIFEST")
     if _bool(values, "ENRICHMENT_KEGG"):
         raise ConfError("ENRICHMENT_KEGG=true is not implemented in alpha.10; use GO, Reactome, or Hallmark")
     if not (_bool(values, "ENRICHMENT_ORA") or _bool(values, "ENRICHMENT_GSEA")):
@@ -351,6 +354,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "enabled": _bool(values, "RUN_APA_B"), "pilot_accepted": _bool(values, "APA_B_PILOT_ACCEPTED"),
             "command_template": values["APA_B_COMMAND_TEMPLATE"],
             "validation_manifest": _path(values["APA_B_VALIDATION_MANIFEST"], base),
+            "installation_manifest": _path(values["APA_B_INSTALLATION_MANIFEST"], base),
         },
         "reporting": {"fdr": _float(values, "FDR"), "min_abs_delta_pau": _float(values, "MIN_ABS_DELTA_PAU")},
         "enrichment": {

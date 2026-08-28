@@ -5,9 +5,9 @@
   "type": "object",
   "additionalProperties": true,
   "required": [
-    "schema_version", "status", "engine", "model", "environment",
+    "schema_version", "status", "engine", "models", "environment",
     "assemblies", "library_protocols", "umi_present", "coordinate_deduplication",
-    "pilot", "reviewed_by", "accepted_at"
+    "quantseq_rev_adaptation", "pilot", "reviewed_by", "accepted_at"
   ],
   "properties": {
     "schema_version": {"const": 1},
@@ -20,10 +20,14 @@
         "source_commit": {"type": "string", "pattern": "^[0-9a-fA-F]{7,40}$"}
       }
     },
-    "model": {
+    "models": {
       "type": "object",
-      "required": ["name", "sha256"],
-      "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}}
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["name", "sha256"],
+        "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}}
+      }
     },
     "environment": {
       "type": "object",
@@ -34,6 +38,7 @@
     "library_protocols": {"type": "array", "contains": {"const": "quantseq_rev_v2_se"}},
     "umi_present": {"const": false},
     "coordinate_deduplication": {"const": false},
+    "quantseq_rev_adaptation": {"const": "genomewide_no_tail_weighted_PAC"},
     "pilot": {
       "type": "object",
       "required": ["synthetic_pass", "real_quantseq_rev_canaries"],

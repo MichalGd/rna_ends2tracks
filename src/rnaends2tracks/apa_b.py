@@ -26,14 +26,26 @@ def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
         raise RuntimeError("APA-B validation manifest must have schema_version=1 and status=accepted")
     engine = payload.get("engine", {})
     model = payload.get("model", {})
+    models = payload.get("models", {})
     environment = payload.get("environment", {})
     if not isinstance(engine, dict) or not re.fullmatch(r"[0-9a-fA-F]{7,40}", str(engine.get("source_commit", ""))):
         raise RuntimeError("APA-B validation manifest requires a pinned engine.source_commit")
-    for label, record in (("model", model), ("environment", environment)):
+    if not model and isinstance(models, dict) and models:
+        model = next(iter(models.values()))
+    for label, record in (("model/models", model), ("environment", environment)):
         if not isinstance(record, dict) or not re.fullmatch(r"[0-9a-fA-F]{64}", str(record.get("sha256", ""))):
             raise RuntimeError(f"APA-B validation manifest requires {label}.sha256")
+    if isinstance(models, dict) and models:
+        assembly_species = {"GRCh38": "human", "GRCm39": "mouse"}
+        for genome in genomes:
+            species = assembly_species.get(genome)
+            record = models.get(species, {})
+            if not isinstance(record, dict) or not re.fullmatch(r"[0-9a-fA-F]{64}", str(record.get("sha256", ""))):
+                raise RuntimeError(f"APA-B validation manifest lacks a pinned {species} model for {genome}")
     if payload.get("umi_present") is not False or payload.get("coordinate_deduplication") is not False:
         raise RuntimeError("APA-B validation must explicitly record no UMI and no coordinate deduplication")
+    if payload.get("quantseq_rev_adaptation") != "genomewide_no_tail_weighted_PAC":
+        raise RuntimeError("APA-B validation manifest covers a different QuantSeq REV adaptation")
     if "quantseq_rev_v2_se" not in payload.get("library_protocols", []):
         raise RuntimeError("APA-B validation does not cover quantseq_rev_v2_se")
     missing = sorted(set(genomes).difference(map(str, payload.get("assemblies", []))))
@@ -58,7 +70,10 @@ def _validate_engine_provenance(path: Path, accepted: dict[str, object], assembl
     if observed.get("assembly") != assembly:
         raise RuntimeError(f"APA-B engine provenance assembly mismatch: {observed.get('assembly')} != {assembly}")
     for section, field in (("engine", "source_commit"), ("model", "sha256"), ("environment", "sha256")):
-        expected_section = accepted.get(section, {})
+        if section == "model" and isinstance(accepted.get("models"), dict):
+            expected_section = accepted["models"].get(str(observed.get("species", "")), accepted.get("model", {}))
+        else:
+            expected_section = accepted.get(section, {})
         observed_section = observed.get(section, {})
         if not isinstance(expected_section, dict) or not isinstance(observed_section, dict):
             raise RuntimeError(f"APA-B engine provenance lacks {section}")
@@ -116,10 +131,11 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
     if not template:
         raise RuntimeError("apa_b.command_template is required for the pinned local PolyAseqTrap installation")
     validation_path = Path(str(settings.get("validation_manifest", "")))
+    installation_path = Path(str(settings.get("installation_manifest", "")))
     accepted_validation = _validation_manifest(validation_path, list(plan.references))
     bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples]
     ref_inputs = [Path(plan.reference_for(genome)[key]) for genome in plan.references for key in ("fasta", "gtf")]
-    signature = signature_for([*bams, *ref_inputs, validation_path], {
+    signature = signature_for([*bams, *ref_inputs, validation_path, installation_path], {
         "module": "apa_b", "settings": settings, "samples": plan.samples,
         "contrasts": plan.contrasts, "reporting": plan.project.get("reporting", {}),
     }) if not dry_run else "dry-run"
@@ -147,7 +163,18 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
                         "gtf": reference["gtf"], "outdir": str(genome_dir),
                         "species": reference["species"], "assembly": reference["assembly"],
                         "threads": str(plan.project["resources"]["apa_b"]["engine_threads"]),
-                        "validation_manifest": str(validation_path)}
+                        "validation_manifest": str(validation_path),
+                        "installation_manifest": str(settings.get("installation_manifest", "")),
+                        "apa_b_executable": str(
+                            Path(str(settings.get("installation_manifest", ""))).parent
+                            / "bin" / "rna-ends2tracks-apa-b"
+                        )}
+        if template.lower() == "auto":
+            template = (
+                "{apa_b_executable} --bam-manifest {bam_manifest} --fasta {fasta} --gtf {gtf} "
+                "--species {species} --assembly {assembly} --outdir {outdir} --threads {threads} "
+                "--validation-manifest {validation_manifest} --installation-manifest {installation_manifest}"
+            )
         try:
             command = shlex.split(template.format(**replacements))
         except KeyError as exc:
@@ -159,6 +186,7 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         counts = genome_dir / "pas_counts.tsv"
         deepip = genome_dir / "deepip_audit.tsv"
         engine_provenance = genome_dir / "engine_provenance.json"
+        adapter_audit = genome_dir / "adapter_audit.json"
         _validate_polyaseqtrap_outputs(catalog, counts, deepip, [sample["sample_id"] for sample in samples])
         _validate_engine_provenance(engine_provenance, accepted_validation, genome)
         stats_dir = genome_dir / "drimseq"
@@ -191,7 +219,7 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
                      float(plan.project["reporting"]["fdr"]),
                      float(plan.project["reporting"]["min_abs_delta_pau"]))
         outputs.extend([
-            manifest, catalog, counts, deepip, engine_provenance, index,
+            manifest, catalog, counts, deepip, engine_provenance, adapter_audit, index,
             pcpa_catalog, pcpa_result,
         ])
         with index.open(encoding="utf-8", newline="") as handle:

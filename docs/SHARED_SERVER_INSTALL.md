@@ -30,7 +30,7 @@ prepend_path("PATH", "/opt/conda/envs/rna_ends2tracks-0.1.0/bin")
 setenv("RNA_ENDS2TRACKS_HOME", "/opt/rna_ends2tracks/0.1.0")
 ```
 
-PolyAseqTrap and its pinned DeepIP model are deliberately installed as a separate pilot environment. Configure `apa_b.command_template` to call the locally validated adapter. APA-B refuses to run unless `pilot_accepted: true` is explicitly recorded.
+PolyAseqTrap and its pinned DeepIP models are deliberately installed as a separate environment with `scripts/bash/install_apa_b.sh`. The current `config.conf` uses `APA_B_COMMAND_TEMPLATE="auto"` and resolves the adapter from `APA_B_INSTALLATION_MANIFEST`; users do not construct a command. APA-B refuses to run unless the synthetic/real pilot has produced an accepted `APA_B_VALIDATION_MANIFEST` and `APA_B_PILOT_ACCEPTED=true` is explicit.
 
 ## User procedure
 

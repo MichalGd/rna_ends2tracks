@@ -5,9 +5,9 @@
     "name": "PolyAseqTrap",
     "source_commit": "REPLACE_WITH_PINNED_COMMIT"
   },
-  "model": {
-    "name": "DeepIP",
-    "sha256": "REPLACE_WITH_64_HEX_SHA256"
+  "models": {
+    "human": {"name": "DeepIP", "sha256": "REPLACE_WITH_HUMAN_MODEL_64_HEX_SHA256"},
+    "mouse": {"name": "DeepIP", "sha256": "REPLACE_WITH_MOUSE_MODEL_64_HEX_SHA256"}
   },
   "environment": {
     "sha256": "REPLACE_WITH_64_HEX_SHA256"
@@ -16,6 +16,7 @@
   "library_protocols": ["quantseq_rev_v2_se"],
   "umi_present": false,
   "coordinate_deduplication": false,
+  "quantseq_rev_adaptation": "genomewide_no_tail_weighted_PAC",
   "pilot": {
     "synthetic_pass": false,
     "real_quantseq_rev_canaries": {

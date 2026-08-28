@@ -6,6 +6,7 @@
 - Add bounded, receipt-backed DGE/APA-A/PCPA and validated APA-B ORA/GSEA using GO, Reactome, and Hallmark gene sets with mapping/database provenance.
 - Add a complete provenance dashboard covering configuration and samplesheet checksums, references/PAS atlases, stage receipts, environment packages, executable versions, and all output files.
 - Require an accepted APA-B validation manifest and matching run-specific engine provenance before producing or interpreting APA-B results.
+- Add a pinned, separately installable PolyAseqTrap/DeepIP APA-B adapter for QuantSeq REV: genome-wide weighted endpoint/PAC clustering, species-specific DeepIP filtering, intragenic PCPA eligibility, model/environment provenance, automated `config.conf` resolution, and synthetic/real-canary acceptance manifests.
 
 - Run CPU-bound per-sample exact-end extraction and mixed Python/native track generation in bounded process pools so configured parallel jobs can use multiple CPU cores.
 - Add an internal chronological master log, atomic run-status snapshot, and `rna-ends2tracks status` command.

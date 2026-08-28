@@ -350,7 +350,9 @@ Keep the visible configuration compact:
 ```bash
 RUN_APA_B=false
 APA_B_PILOT_ACCEPTED=false
-APA_B_COMMAND_TEMPLATE=""
+APA_B_COMMAND_TEMPLATE="auto"
+APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-v1/installation_manifest.json"
+APA_B_VALIDATION_MANIFEST=""
 APA_B_THREADS=8
 ```
 
@@ -967,7 +969,7 @@ Avoid exposing implementation-only toggles. Advanced settings that are rarely sa
 - [ ] `rna-ends2tracks status` accurately reports a running, failed, and completed workflow.
 - [ ] Early C0 raw and CPM BigWigs appear after alignment and before APA completion.
 - [ ] Track generation performs no redundant BAM strand extraction per normalization.
-- [ ] APA-B installation is pinned and reproducible, or remains explicitly disabled with an actionable pilot guide.
+- [x] APA-B installation, species-specific DeepIP models, adapter CLI, independent catalog, and acceptance-manifest builder are pinned and reproducible; production enablement still requires the documented server pilot.
 - [ ] APA-A is unchanged by enabling/disabling APA-B.
 - [x] DGE enrichment separates up/down ORA and uses Wald-statistic ranked GSEA with the correct tested C4 background.
 - [x] APA enrichment separates proximal/distal and increased/decreased PCPA using the correct testable-gene background.

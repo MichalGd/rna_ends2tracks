@@ -18,6 +18,16 @@ Installation can run while another workflow is active because it creates differe
 
 Reference FASTA/GTF/STAR/atlas assets remain shared read-only inputs and are not duplicated into the Conda environment. Validate both human and mouse config-only canaries before production, then run a small real-read preprocessing/exact-end canary for each genome.
 
+## Optional APA-B environment
+
+Install the pinned PolyAseqTrap/DeepIP branch separately after the main alpha.10 release:
+
+```bash
+bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10
+```
+
+This creates `/opt/conda_envs/rna_ends2tracks-apa-b-v1` without changing the stable main launcher. It is safe to install beside an active main-workflow run if disk and memory headroom are adequate. APA-B remains disabled until the synthetic pilot and a real QuantSeq REV canary for each intended assembly pass. Follow [the APA-B pilot contract](POLYASEQTRAP_ADAPTER_CONTRACT.md); do not set `APA_B_PILOT_ACCEPTED=true` merely because installation succeeded.
+
 Rollback changes only the stable symlink:
 
 ```bash
