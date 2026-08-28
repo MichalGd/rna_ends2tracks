@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rna-ends2tracks"
-version = "0.1.0a9.post2"
+version = "0.1.0a10"
 description = "Portable QuantSeq REV gene-expression and alternative-polyadenylation workflow"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,6 +14,8 @@ dependencies = [
 
 [project.scripts]
 rna-ends2tracks = "rnaends2tracks.cli:main"
+rna-ends2tracks-apa-b = "rnaends2tracks.polyaseqtrap_adapter:main"
+rna-ends2tracks-accept-apa-b-pilot = "rnaends2tracks.apa_b_pilot:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -22,5 +24,5 @@ where = ["src"]
 "share/rna_ends2tracks/scripts/R" = ["scripts/R/*.R"]
 "share/rna_ends2tracks/scripts" = ["scripts/build_pas_atlas.py", "scripts/prepare_pas_sources.py"]
 "share/rna_ends2tracks/resources" = ["resources/*.fa"]
-"share/rna_ends2tracks/config" = ["config/config.conf", "config/samplesheet.csv"]
+"share/rna_ends2tracks/config" = ["config/config.conf", "config/samplesheet.csv", "config/apa_b_validation.example.json"]
 "share/rna_ends2tracks/docs" = ["docs/*.md"]

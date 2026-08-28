@@ -10,8 +10,8 @@ from typing import Any
 import pysam
 
 from .config import RunPlan, sample_universe, signature_for
-from .execution import run_bounded
-from .external import event, require_tools
+from .execution import run_bounded_processes
+from .external import event, progress_events, require_tools
 from .mcell2019 import (
     assign_gene,
     build_gene_bins,
@@ -173,6 +173,13 @@ def _extract_sample(plan: RunPlan, results: Path, sample: dict[str, str], force:
     return tuple(outputs)  # type: ignore[return-value]
 
 
+def _extract_sample_process(
+    plan: RunPlan, results: Path, sample: dict[str, str], force: bool,
+) -> tuple[Path, Path, Path, Path, Path]:
+    """Pickle-safe process-pool entry point for one biological sample."""
+    return _extract_sample(plan, results, sample, force)
+
+
 def _discover_genome(plan: RunPlan, results: Path, genome: str) -> tuple[list[Path], list[dict[str, Any]]]:
     reference = plan.reference_for(genome)
     samples = [sample for sample in plan.samples if sample["genome"] == genome]
@@ -267,12 +274,16 @@ def exact_ends_stage(plan: RunPlan, results: Path, dry_run: bool = False, force:
         event(log_dir, "exact_ends", "skipped", "Valid project receipt")
     else:
         jobs = [
-            (sample["sample_id"], lambda sample=sample: _extract_sample(plan, results, sample, force))
+            (sample["sample_id"], _extract_sample_process, (plan, results, sample, force))
             for sample in plan.samples
         ]
-        outputs_nested = run_bounded(
+        parallel_jobs = plan.project["resources"]["apa_a"]["extraction_parallel_jobs"]
+        event(log_dir, "exact_ends", "started",
+              f"Launching {len(jobs)} sample workers with process_parallel_jobs={parallel_jobs}")
+        outputs_nested = run_bounded_processes(
             "exact_ends", jobs, plan.project["resources"]["apa_a"]["extraction_parallel_jobs"],
             results / ".checkpoints" / "timings" / "exact_ends",
+            progress=progress_events(log_dir, "exact_ends", len(jobs), "sample"),
         )
         outputs = [path for paths in outputs_nested for path in paths]
         write_receipt("exact_ends", exact_root, exact_signature, outputs, ["rna-ends2tracks", "exact_ends"])
@@ -356,7 +367,7 @@ def apa_statistics_stage(
             receipt_root=outdir / ".receipts", index_path=index_path,
             parallel_jobs=plan.project["resources"]["apa_a"]["contrast_parallel_jobs"], threads=1,
             memory_gb=plan.project["resources"]["apa_a"]["contrast_memory_gb"],
-            output_suffixes=[".dexseq.tsv", ".apa_shift.tsv"],
+            output_suffixes=[".dexseq.tsv", ".apa_shift.tsv", ".gene_apa_summary.tsv"],
             signature_inputs=[active_root / genome / "C3_active_pas_counts.tsv", active_root / genome / "active_pas_catalog.tsv"],
             signature_parameters={
                 "design": plan.project["design"], "genome": genome,
@@ -372,7 +383,10 @@ def apa_statistics_stage(
         stats_outputs.extend([index_path, pcpa_path])
         with index_path.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
-                stats_outputs.extend([Path(row["result_file"]), Path(row["shift_file"])])
+                stats_outputs.extend([
+                    Path(row["result_file"]), Path(row["shift_file"]),
+                    Path(row["gene_summary_file"]),
+                ])
     if stats_outputs:
         stats_signature = signature_for(active_inputs, {
             "module": "apa_a_statistics", "contrasts": plan.contrasts,

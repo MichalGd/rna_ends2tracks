@@ -42,15 +42,16 @@ class ReceiptTests(unittest.TestCase):
             receipt_dir = root / "receipt"
             receipt = write_receipt("test", receipt_dir, "sig", [output], ["test"])
             payload = json.loads(receipt.read_text(encoding="utf-8"))
-            payload["workflow_version"] = "0.1.0a9"
-            receipt.write_text(json.dumps(payload), encoding="utf-8")
-            self.assertTrue(receipt_valid(receipt_dir, "sig"))
-            payload["workflow_version"] = "0.1.0a9.post1"
-            receipt.write_text(json.dumps(payload), encoding="utf-8")
-            self.assertTrue(receipt_valid(receipt_dir, "sig"))
-            payload["workflow_version"] = "0.1.0a8"
-            receipt.write_text(json.dumps(payload), encoding="utf-8")
-            self.assertFalse(receipt_valid(receipt_dir, "sig"))
+            with patch("rnaends2tracks.receipts.__version__", "0.1.0a9.post2"):
+                payload["workflow_version"] = "0.1.0a9"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertTrue(receipt_valid(receipt_dir, "sig"))
+                payload["workflow_version"] = "0.1.0a9.post1"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertTrue(receipt_valid(receipt_dir, "sig"))
+                payload["workflow_version"] = "0.1.0a8"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertFalse(receipt_valid(receipt_dir, "sig"))
 
 
 if __name__ == "__main__":

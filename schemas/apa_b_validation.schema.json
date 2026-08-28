@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MichalGd/rna_ends2tracks/schemas/apa_b_validation.schema.json",
+  "title": "rna_ends2tracks APA-B pilot acceptance",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version", "status", "engine", "models", "environment",
+    "assemblies", "library_protocols", "umi_present", "coordinate_deduplication",
+    "quantseq_rev_adaptation", "pilot", "reviewed_by", "accepted_at"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"const": "accepted"},
+    "engine": {
+      "type": "object",
+      "required": ["name", "source_commit"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-fA-F]{7,40}$"}
+      }
+    },
+    "models": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["name", "sha256"],
+        "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["sha256"],
+      "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}}
+    },
+    "assemblies": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "library_protocols": {"type": "array", "contains": {"const": "quantseq_rev_v2_se"}},
+    "umi_present": {"const": false},
+    "coordinate_deduplication": {"const": false},
+    "quantseq_rev_adaptation": {"const": "genomewide_no_tail_weighted_PAC"},
+    "pilot": {
+      "type": "object",
+      "required": ["synthetic_pass", "real_quantseq_rev_canaries"],
+      "properties": {
+        "synthetic_pass": {"const": true},
+        "real_quantseq_rev_canaries": {"type": "object", "additionalProperties": {"const": "PASS"}}
+      }
+    },
+    "reviewed_by": {"type": "string", "minLength": 1},
+    "accepted_at": {"type": "string", "minLength": 1}
+  }
+}

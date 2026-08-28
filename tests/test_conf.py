@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rnaends2tracks.conf import ConfError, read_conf
+from rnaends2tracks.conf import ConfError, project_from_conf, read_conf
 from rnaends2tracks.config import ConfigError, build_conf_plan, workflow_requirements
 
 HEADER = "sample_id,description,genome,biological_replicate_id,technical_replicate_id,lane_id,fastq_r1,fastq_r2,condition,batch,subject,library_protocol,library_layout,read_length,kit_catalog,umi_present\n"
@@ -34,6 +34,40 @@ class ConfTests(unittest.TestCase):
             path.write_text("PROJECT_ID=x\nSAMPLESHEET=$(touch bad)\nOUTPUT_DIR=out\n", encoding="utf-8")
             with self.assertRaises(ConfError): read_conf(path)
 
+    def test_ucsc_url_rejects_markdown_and_accepts_plain_http(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.conf"
+            base = "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+            config.write_text(
+                base + "UCSC_BIGDATA_URL_PREFIX=[http://example.test](http://example.test)\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfError, "plain URL"):
+                project_from_conf(config)
+            config.write_text(
+                base + "UCSC_BIGDATA_URL_PREFIX=http://example.test/project\n",
+                encoding="utf-8",
+            )
+            project, _ = project_from_conf(config)
+            self.assertEqual(
+                project["tracks"]["ucsc_bigdata_url_prefix"],
+                "http://example.test/project",
+            )
+
+    def test_enrichment_controls_and_apa_b_manifest_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); config = root / "config.conf"
+            base = "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+            config.write_text(base + "ENRICHMENT_MIN_GENESET_SIZE=600\nENRICHMENT_MAX_GENESET_SIZE=500\n",
+                              encoding="utf-8")
+            with self.assertRaisesRegex(ConfError, "must not exceed"):
+                project_from_conf(config)
+            config.write_text(base + "RUN_APA_B=true\nAPA_B_PILOT_ACCEPTED=true\nAPA_B_COMMAND_TEMPLATE=adapter\n",
+                              encoding="utf-8")
+            with self.assertRaisesRegex(ConfError, "APA_B_VALIDATION_MANIFEST"):
+                project_from_conf(config)
+
     def test_mixed_genomes_create_only_within_genome_contrasts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -54,6 +88,7 @@ class ConfTests(unittest.TestCase):
                 "MM39_CHROM_SIZES=/ref/m/sizes", "MM39_PAS_ATLAS=/ref/m/pas",
             ]) + "\n", encoding="utf-8")
             plan = build_conf_plan(config, check_inputs=False)
+            self.assertTrue(plan.project["tracks"]["early_c0"])
             self.assertEqual(len(plan.contrasts), 2)
             self.assertEqual({row["genome"] for row in plan.contrasts}, {"GRCh38", "GRCm39"})
             self.assertTrue(all(row["contrast_id"].startswith(row["genome"] + ".") for row in plan.contrasts))

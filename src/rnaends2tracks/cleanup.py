@@ -68,6 +68,16 @@ def _require_successful_workflow(plan: RunPlan, root: Path) -> None:
     if modules.get("tracks", True):
         required.append("09_tracks")
     incomplete = [name for name in required if not _successful_receipt(root / name)]
+    enrichment_enabled = bool(
+        (modules.get("dge_enrichment", False) and modules.get("gene_expression", True))
+        or (modules.get("apa_enrichment", False) and (
+            modules.get("apa_a", True) or plan.project.get("apa_b", {}).get("enabled", False)
+        ))
+    )
+    if enrichment_enabled and not _successful_receipt(
+        root / "10_reports" / "enrichment_summary"
+    ):
+        incomplete.append("10_reports/enrichment_summary")
     if incomplete:
         raise RuntimeError(
             "Cleanup requires a successful complete workflow; missing or invalid receipts: "

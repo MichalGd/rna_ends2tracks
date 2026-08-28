@@ -26,6 +26,7 @@ flowchart TD
     V --> QT[Raw FastQC and BBDuk trimming]
     QT --> STAR[STAR alignment and orientation check]
     STAR --> C0[C0 mapped primary NH=1 alignments]
+    C0 --> C0TRACKS[Early raw and CPM strand-specific C0 tracks]
     C0 --> C1[C1 exact transcript ends]
     C0 --> C1S[C1S end-defining clipped reads: QC]
     C1 --> MASK[Strand-specific internal-priming mask]
@@ -41,14 +42,15 @@ flowchart TD
     C4 --> DGE[Pairwise DESeq2 DGE]
     C3 --> APA[Pairwise DEXSeq APA and shift direction]
     C4 --> SF[Global DESeq2 and robust-CPM factors]
-    C0 --> TRACKS[Strand-specific tracks]
+    C0TRACKS --> TRACKS[Combined strand-specific track index]
     C1 --> TRACKS
     C2 --> TRACKS
     C2R --> TRACKS
     C3 --> TRACKS
     SF --> TRACKS
-    DGE --> REPORT[HTML/Markdown/TSV report]
-    APA --> REPORT
+    DGE --> ENRICH[DGE and APA enrichment]
+    APA --> ENRICH
+    ENRICH --> REPORT[HTML/Markdown/TSV scientific report]
     TRACKS --> REPORT
     REPORT --> CLEAN[Success-only cleanup]
 ```
@@ -66,7 +68,7 @@ flowchart TD
 - Intragenic intronic and non-terminal-exonic PAS are retained as candidate premature cleavage/polyadenylation events.
 - C4 active-PAS gene sums are primary DGE. C5 featureCounts values are diagnostic only.
 
-See [methods](docs/methods.md), [PAS atlases](docs/pas_atlases.md), and [limitations](docs/limitations.md).
+The `C` labels mean workflow-specific **count universes**, not standard RNA-seq terms. C1S and C2R are side branches, while C5 is an independent diagnostic. See [C0-C5 data stages](docs/data_stages.md), [methods](docs/methods.md), [PAS atlases](docs/pas_atlases.md), and [limitations](docs/limitations.md).
 
 ## Quick start
 
@@ -83,8 +85,18 @@ rna-ends2tracks --stop-after validate config/config.conf
 6. Run:
 
 ```bash
-rna-ends2tracks config/config.conf 2>&1 | tee rna_ends2tracks.log
+rna-ends2tracks config/config.conf
 ```
+
+The workflow writes one chronological master log inside the configured `OUTPUT_DIR`. Monitor it or request a concise snapshot from another shell:
+
+```bash
+tail -F /path/to/OUTPUT_DIR/rna_ends2tracks.log
+rna-ends2tracks status config/config.conf
+```
+
+Detailed native-tool output remains under `OUTPUT_DIR/logs/`, and the latest machine-readable state is `OUTPUT_DIR/00_metadata/run_status.json`.
+The status snapshot includes the workflow PID and whether it is still running, an ordered stage table, free disk space, and counts of contrasts, final BAMs, BigWigs, DGE/APA result tables, and reports. Bounded lane, sample, track, and contrast pools report completed/total work, elapsed time, and an approximate ETA to the master log. Use `--json` for the same observations in machine-readable form.
 
 Useful controls:
 
@@ -94,6 +106,8 @@ rna-ends2tracks --from-step exact_ends config/config.conf
 rna-ends2tracks --stop-after alignment config/config.conf
 rna-ends2tracks --force-step tracks config/config.conf
 ```
+
+With the default `GENERATE_EARLY_C0_TRACKS=true`, raw and CPM all-read BigWigs are produced by the resumable `c0_tracks` stage immediately after alignment, before exact-end, DGE, and APA analysis. The later `tracks` stage reuses those outputs and generates only end-derived families; it does not repeat C0 strand extraction.
 
 Matching receipts skip complete work. Small outputs use SHA-256 validation; large BAM/track outputs use size plus nanosecond mtime to keep resume checks fast after native tool validation. A lock under `.checkpoints/workflow.lock` prevents two processes from modifying the same output directory.
 
@@ -124,6 +138,10 @@ Required columns include:
 
 The resolved maximum CPU/RAM for each pool is written before analysis. Outputs and timing fragments are deterministic even when jobs finish out of order.
 
+Alpha.10 distinguishes executor types in `00_metadata/resource_plan.tsv`: external tools remain in bounded thread-managed subprocess pools, while CPU-bound Python exact-end workers use separate processes so `END_EXTRACTION_PARALLEL_JOBS` corresponds to usable CPU concurrency.
+
+Raw/CPM C0 track workers may overlap the sample-merge phase. The dispatcher first reserves the configured maximum merge CPU and RAM, then starts only the number of track workers that fit inside the remaining global ceilings. A zero-worker result is safe: track publication is deferred automatically to the dedicated `c0_tracks` stage. The current alpha.10 checkpoint does not overlap tracks with STAR itself.
+
 ## Track families
 
 | Family | Universe | Raw | CPM | DESeq2 | Robust CPM |
@@ -140,6 +158,7 @@ Transcript-plus and transcript-minus BigWigs are separate; minus values are nega
 
 ```text
 results/
+├── rna_ends2tracks.log        chronological stages and job outcomes
 ├── 00_metadata/
 ├── 01_qc/
 ├── 02_alignment/              C0 BAMs and orientation audit
@@ -157,16 +176,20 @@ results/
 
 `CLEANUP_INTERMEDIATES=true` is the default. Cleanup runs only after all enabled deliverable receipts and the report validate. It removes only an explicit allow-list (trimmed FASTQs, lane/all-alignment BAMs, temporary strand BAMs and bedGraphs), writes `provenance/cleanup/cleanup_manifest.tsv`, and preserves final BAMs, count universes, statistics, BigWigs, reports and provenance.
 
+`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; optional validated APA-B results; and APA-A/APA-B direction concordance. It embeds PCA, sample-distance, MA, volcano, and enrichment plots; lists validated samples and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC remains the detailed sequencing/alignment QC report. See [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
+
+Every report run also creates `10_reports/bigwig_collections.txt`, a one-column list grouped by track folder, and `10_reports/ucsc_track_descriptors/`, containing one descriptor file per collection plus `UCSC_bigWig_tracks.oneline.txt`. Each BigWig uses one valid UCSC custom-track line, collection-specific color, and optional `negateValues=on` for transcript-minus tracks. Set `UCSC_BIGDATA_URL_PREFIX` to the public directory containing a flat copy of the BigWigs; do not use Markdown link syntax in `config.conf`.
+
 ## Installation
 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.9.post2
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.10
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).
 
 ## APA-B status
 
-APA-B remains disabled and pilot-gated. Enabling it requires an independently installed, pinned adapter command plus explicit `APA_B_PILOT_ACCEPTED=true`. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output.
+APA-B now has a repository-owned, pinned PolyAseqTrap/DeepIP QuantSeq REV adapter and one-command separate-environment installer. It clusters genome-wide transcript 3′ endpoints with PolyAseqTrap and applies the official species-specific DeepIP model, so internal-exonic and intronic candidate PCPA sites are eligible even far from an annotated gene end. It remains disabled until the shared installation passes synthetic and real QuantSeq canaries. Enabling it then requires `APA_B_PILOT_ACCEPTED=true` and a schema-v1 `APA_B_VALIDATION_MANIFEST` whose engine/model/environment identities match run provenance. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output. See [APA-B and comparison](docs/11_apa_b_and_comparison.md) and the [pilot contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md).

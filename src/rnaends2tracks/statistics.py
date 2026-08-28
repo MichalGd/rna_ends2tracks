@@ -5,7 +5,7 @@ from typing import Any
 
 from .config import RunPlan, signature_for
 from .execution import merge_tsv_fragments, run_bounded
-from .external import run
+from .external import progress_events, run
 from .receipts import receipt_valid, write_receipt
 
 
@@ -80,6 +80,7 @@ def run_r_contrasts(
     run_bounded(
         f"{module}_contrasts", jobs, parallel_jobs,
         results / ".checkpoints" / "timings" / module / "contrasts",
+        progress=progress_events(results / "logs", module, len(jobs), "contrast"),
     )
     if not dry_run:
         merge_tsv_fragments(fragment_paths, index_path)

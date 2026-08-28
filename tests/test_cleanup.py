@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rnaends2tracks import __version__
 from rnaends2tracks.cleanup import clean_intermediates
@@ -88,7 +89,8 @@ class CleanupTests(unittest.TestCase):
             trimmed = results / "01_qc" / "trimmed_fastq" / "S1.trimmed.fastq.gz"
             trimmed.parent.mkdir(parents=True, exist_ok=True); trimmed.write_bytes(b"test")
             _write_success_receipts(results, workflow_version="0.1.0a9")
-            clean_intermediates(_plan(), results)
+            with patch("rnaends2tracks.receipts.__version__", "0.1.0a9.post2"):
+                clean_intermediates(_plan(), results)
             self.assertFalse(trimmed.exists())
 
     def test_repeated_cleanup_preserves_manifest(self):

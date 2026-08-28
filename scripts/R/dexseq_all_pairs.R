@@ -184,7 +184,9 @@ for (i in seq_len(nrow(contrasts))) {
   dxd <- estimateDispersions(dxd)
   dxd <- testForDEU(dxd, reducedModel=reduced_formula)
   dxd <- estimateExonFoldChanges(dxd, fitExpToVar="condition")
-  result <- tabular_dexseq_result(as.data.frame(DEXSeqResults(dxd)))
+  dexseq_result <- DEXSeqResults(dxd)
+  gene_qvalues <- perGeneQValue(dexseq_result)
+  result <- tabular_dexseq_result(as.data.frame(dexseq_result))
   result$pas_id <- as.character(result$featureID)
   result_catalog_rows <- catalog_rows_for_pas(catalog, result$pas_id)
   norm <- counts(dxd, normalized=TRUE)
@@ -200,6 +202,7 @@ for (i in seq_len(nrow(contrasts))) {
   result$PAU_numerator <- ifelse(num_total > 0, num / num_total, 0)
   result$delta_PAU <- result$PAU_numerator - result$PAU_denominator
   result$gene_id <- as.character(catalog$gene_id[result_catalog_rows])
+  result$gene_padj <- as.numeric(gene_qvalues[match(result$gene_id, names(gene_qvalues))])
   result$summit_start <- catalog$summit_start[result_catalog_rows]
   result$strand <- as.character(catalog$strand[result_catalog_rows])
   if (anyNA(result$gene_id) || any(!nzchar(result$gene_id))) {
@@ -252,9 +255,34 @@ for (i in seq_len(nrow(contrasts))) {
     )
   }
   shift_target <- file.path(outdir, paste0(con$contrast_id, ".apa_shift.tsv"))
-  write.table(do.call(rbind, shift_rows), shift_target, sep="\t", quote=FALSE, row.names=FALSE)
+  shift_table <- do.call(rbind, shift_rows)
+  write.table(shift_table, shift_target, sep="\t", quote=FALSE, row.names=FALSE)
+  finite_max <- function(values) {
+    values <- values[is.finite(values)]
+    if (length(values)) max(values) else NA_real_
+  }
+  gene_summary <- do.call(rbind, lapply(split(result, result$gene_id), function(rows) {
+    data.frame(
+      gene_id=rows$gene_id[1], gene_padj=rows$gene_padj[1], testable_sites=nrow(rows),
+      significant_sites=sum(!is.na(rows$padj) & rows$padj < fdr),
+      max_abs_delta_PAU=finite_max(abs(rows$delta_PAU)),
+      signed_shift_score=ifelse(
+        is.na(rows$gene_padj[1]), NA_real_,
+        -log10(max(rows$gene_padj[1], .Machine$double.xmin))
+      ), stringsAsFactors=FALSE
+    )
+  }))
+  gene_summary <- merge(gene_summary, shift_table[, c("gene_id", "shift", "proximal_pas", "distal_pas", "comparator_rule")],
+                        by="gene_id", all.x=TRUE, sort=FALSE)
+  gene_summary$signed_shift_score <- ifelse(
+    gene_summary$shift == "distal", gene_summary$signed_shift_score,
+    ifelse(gene_summary$shift == "proximal", -gene_summary$signed_shift_score, 0)
+  )
+  gene_summary_target <- file.path(outdir, paste0(con$contrast_id, ".gene_apa_summary.tsv"))
+  write.table(gene_summary, gene_summary_target, sep="\t", quote=FALSE, row.names=FALSE)
   index[[length(index) + 1]] <- data.frame(
-    contrast_id=con$contrast_id, result_file=target, shift_file=shift_target, tested_sites=nrow(result),
+    contrast_id=con$contrast_id, result_file=target, shift_file=shift_target,
+    gene_summary_file=gene_summary_target, tested_sites=nrow(result),
     significant_sites=sum(!is.na(result$padj) & result$padj < fdr), design_mode=con$design_mode,
     resolved_design=design_text, paired=con$paired, n_pairs=con$n_pairs, warning=con$design_status,
     check.names=FALSE

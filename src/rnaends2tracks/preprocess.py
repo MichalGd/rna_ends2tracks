@@ -5,17 +5,18 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import tempfile
 from collections import defaultdict
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from .config import RunPlan, signature_for
 from .execution import run_bounded
-from .external import event, require_tools, run
+from .external import event, progress_events, require_tools, run, run_to_path
 from .paths import workflow_asset
 from .receipts import receipt_valid, write_receipt
+from .tracks import c0_tracks_enabled, make_c0_tracks_for_sample
 
 
 def _fastqc_report(directory: Path, fastq: str | Path) -> Path:
@@ -45,6 +46,29 @@ def _remove_owned_temporary_tree(path: Path) -> None:
             child = root_path / directory
             child.chmod(child.stat().st_mode | stat.S_IWUSR | stat.S_IXUSR)
     shutil.rmtree(path)
+
+
+def _c0_overlap_workers(plan: RunPlan) -> int:
+    """Return a conservative track-worker count that fits beside sample merging."""
+    if not c0_tracks_enabled(plan):
+        return 0
+    resources = plan.project["resources"]
+    preprocess_resources = resources["preprocess"]
+    track_resources = resources["tracks"]
+    merge_workers = min(preprocess_resources["merge_parallel_jobs"], len(plan.samples))
+    remaining_threads = (
+        resources["total_threads"]
+        - merge_workers * preprocess_resources["samtools_threads"]
+    )
+    remaining_memory = (
+        resources["total_memory_gb"]
+        - merge_workers * preprocess_resources["merge_memory_gb"]
+    )
+    by_threads = remaining_threads // track_resources["samtools_threads"]
+    by_memory = remaining_memory // track_resources["memory_gb"]
+    return max(0, min(
+        track_resources["parallel_jobs"], len(plan.samples), by_threads, by_memory,
+    ))
 
 
 def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool = False) -> None:
@@ -148,7 +172,10 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
 
         trim_jobs.append((token, trim_worker))
 
-    run_bounded("qc_and_trim", trim_jobs, resource["trim_parallel_jobs"], timing_dir / "trim")
+    run_bounded(
+        "qc_and_trim", trim_jobs, resource["trim_parallel_jobs"], timing_dir / "trim",
+        progress=progress_events(log_dir, "alignment", len(trim_jobs), "QC/trim lane"),
+    )
 
     alignment_jobs: list[tuple[str, Any]] = []
     for context in contexts:
@@ -227,8 +254,10 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
 
         alignment_jobs.append((context["token"], alignment_worker))
 
-    orientation_rows = run_bounded("star_and_sort", alignment_jobs, resource["star_parallel_jobs"],
-                                   timing_dir / "alignment")
+    orientation_rows = run_bounded(
+        "star_and_sort", alignment_jobs, resource["star_parallel_jobs"], timing_dir / "alignment",
+        progress=progress_events(log_dir, "alignment", len(alignment_jobs), "STAR lane"),
+    )
 
     merge_jobs: list[tuple[str, Any]] = []
     for sample in plan.samples:
@@ -267,10 +296,11 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             if not dry_run:
                 temporary_index.replace(sample_bam.with_suffix(".bam.bai"))
                 temporary_flagstat = sample_dir / ".flagstat.tsv.tmp"
-                with temporary_flagstat.open("w", encoding="utf-8") as output:
-                    subprocess.run(["samtools", "flagstat", "-@", str(resource["samtools_threads"]), "-O", "tsv",
-                                    str(sample_bam)], stdout=output, stderr=subprocess.STDOUT, check=True, text=True,
-                                   env=None if tool_env is None else {**os.environ, **tool_env})
+                run_to_path(
+                    ["samtools", "flagstat", "-@", str(resource["samtools_threads"]), "-O", "tsv",
+                     str(sample_bam)],
+                    temporary_flagstat, sample_log, env=tool_env,
+                )
                 temporary_flagstat.replace(flagstat)
                 write_receipt("preprocess_merge", receipt_dir, sample_signature,
                               [sample_bam, sample_bam.with_suffix(".bam.bai"), flagstat],
@@ -282,7 +312,72 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
 
         merge_jobs.append((sample_id, merge_worker))
 
-    run_bounded("preprocess_merges", merge_jobs, resource["merge_parallel_jobs"], timing_dir / "merges")
+    overlap_workers = _c0_overlap_workers(plan)
+    early_c0_enabled = c0_tracks_enabled(plan)
+    sample_by_id = {sample["sample_id"]: sample for sample in plan.samples}
+    merge_progress = progress_events(log_dir, "alignment", len(merge_jobs), "C0 sample")
+    if dry_run:
+        run_bounded(
+            "preprocess_merges", merge_jobs, resource["merge_parallel_jobs"], timing_dir / "merges",
+            progress=merge_progress,
+        )
+        if early_c0_enabled:
+            event(
+                log_dir, "c0_tracks", "dry_run",
+                f"Would stream sample-ready C0 tracks with {overlap_workers} overlap worker(s); "
+                "zero means defer to the dedicated c0_tracks stage",
+            )
+    elif overlap_workers:
+        event(
+            log_dir, "c0_tracks", "started",
+            f"Streaming sample-ready C0 tracks with {overlap_workers} worker(s) while BAM merging continues",
+        )
+        track_progress = progress_events(log_dir, "c0_tracks", len(merge_jobs), "sample")
+        track_failures: list[tuple[str, Exception]] = []
+        with ThreadPoolExecutor(
+            max_workers=overlap_workers, thread_name_prefix="sample_ready_c0_tracks",
+        ) as track_pool:
+            track_futures: dict[Future[Any], str] = {}
+
+            def submit_c0_tracks(sample_id: str, _sample_bam: Path) -> None:
+                track_futures[
+                    track_pool.submit(
+                        make_c0_tracks_for_sample,
+                        plan, results, sample_by_id[sample_id], False,
+                    )
+                ] = sample_id
+
+            run_bounded(
+                "preprocess_merges", merge_jobs, resource["merge_parallel_jobs"],
+                timing_dir / "merges", progress=merge_progress,
+                on_completed=submit_c0_tracks,
+            )
+            for future in as_completed(track_futures):
+                sample_id = track_futures[future]
+                try:
+                    future.result()
+                    track_progress(sample_id, "completed")
+                except Exception as exc:  # noqa: BLE001 - report every sample failure
+                    track_failures.append((sample_id, exc))
+                    track_progress(sample_id, "failed")
+        if track_failures:
+            detail = "; ".join(f"{sample_id}: {exc}" for sample_id, exc in track_failures)
+            raise RuntimeError(f"sample-ready C0 track worker failures: {detail}")
+        event(
+            log_dir, "c0_tracks", "completed",
+            f"Published sample-ready C0 tracks for {len(track_futures)} sample(s)",
+        )
+    else:
+        if early_c0_enabled:
+            event(
+                log_dir, "c0_tracks", "deferred",
+                "Combined CPU/RAM budget leaves no safe overlap capacity; "
+                "C0 tracks will run in the dedicated c0_tracks stage",
+            )
+        run_bounded(
+            "preprocess_merges", merge_jobs, resource["merge_parallel_jobs"], timing_dir / "merges",
+            progress=merge_progress,
+        )
     # Frozen shared environments make MultiQC's copied template directories read-only.
     # Disable MultiQC's own cleanup and remove only our dedicated temporary tree.
     multiqc_temp_parent = results / ".checkpoints" / "multiqc_tmp"

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import json
+import re
 import shlex
 from pathlib import Path
 
@@ -11,6 +13,74 @@ from .receipts import receipt_valid, write_receipt
 from .statistics import run_r_contrasts
 
 REQUIRED_CATALOG = {"pas_id", "gene_id", "chrom", "start", "end", "strand", "feature_class"}
+
+
+def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
+    if not path.is_file():
+        raise RuntimeError(f"APA-B validation manifest is unavailable: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"APA-B validation manifest is invalid JSON: {path}") from exc
+    if payload.get("schema_version") != 1 or payload.get("status") != "accepted":
+        raise RuntimeError("APA-B validation manifest must have schema_version=1 and status=accepted")
+    engine = payload.get("engine", {})
+    model = payload.get("model", {})
+    models = payload.get("models", {})
+    environment = payload.get("environment", {})
+    if not isinstance(engine, dict) or not re.fullmatch(r"[0-9a-fA-F]{7,40}", str(engine.get("source_commit", ""))):
+        raise RuntimeError("APA-B validation manifest requires a pinned engine.source_commit")
+    if not model and isinstance(models, dict) and models:
+        model = next(iter(models.values()))
+    for label, record in (("model/models", model), ("environment", environment)):
+        if not isinstance(record, dict) or not re.fullmatch(r"[0-9a-fA-F]{64}", str(record.get("sha256", ""))):
+            raise RuntimeError(f"APA-B validation manifest requires {label}.sha256")
+    if isinstance(models, dict) and models:
+        assembly_species = {"GRCh38": "human", "GRCm39": "mouse"}
+        for genome in genomes:
+            species = assembly_species.get(genome)
+            record = models.get(species, {})
+            if not isinstance(record, dict) or not re.fullmatch(r"[0-9a-fA-F]{64}", str(record.get("sha256", ""))):
+                raise RuntimeError(f"APA-B validation manifest lacks a pinned {species} model for {genome}")
+    if payload.get("umi_present") is not False or payload.get("coordinate_deduplication") is not False:
+        raise RuntimeError("APA-B validation must explicitly record no UMI and no coordinate deduplication")
+    if payload.get("quantseq_rev_adaptation") != "genomewide_no_tail_weighted_PAC":
+        raise RuntimeError("APA-B validation manifest covers a different QuantSeq REV adaptation")
+    if "quantseq_rev_v2_se" not in payload.get("library_protocols", []):
+        raise RuntimeError("APA-B validation does not cover quantseq_rev_v2_se")
+    missing = sorted(set(genomes).difference(map(str, payload.get("assemblies", []))))
+    if missing:
+        raise RuntimeError("APA-B validation does not cover assemblies: " + ", ".join(missing))
+    pilot = payload.get("pilot", {})
+    if not isinstance(pilot, dict) or pilot.get("synthetic_pass") is not True:
+        raise RuntimeError("APA-B validation requires a passing synthetic coordinate/strand pilot")
+    real_canaries = pilot.get("real_quantseq_rev_canaries", {})
+    if not isinstance(real_canaries, dict) or any(real_canaries.get(genome) != "PASS" for genome in genomes):
+        raise RuntimeError("APA-B validation requires a passing real QuantSeq REV canary for every assembly")
+    for field in ("reviewed_by", "accepted_at"):
+        if not str(payload.get(field, "")).strip():
+            raise RuntimeError(f"APA-B validation manifest requires {field}")
+    return payload
+
+
+def _validate_engine_provenance(path: Path, accepted: dict[str, object], assembly: str) -> None:
+    if not path.is_file():
+        raise RuntimeError(f"APA-B adapter did not create engine provenance: {path}")
+    observed = json.loads(path.read_text(encoding="utf-8"))
+    if observed.get("assembly") != assembly:
+        raise RuntimeError(f"APA-B engine provenance assembly mismatch: {observed.get('assembly')} != {assembly}")
+    for section, field in (("engine", "source_commit"), ("model", "sha256"), ("environment", "sha256")):
+        if section == "model" and isinstance(accepted.get("models"), dict):
+            expected_section = accepted["models"].get(str(observed.get("species", "")), accepted.get("model", {}))
+        else:
+            expected_section = accepted.get(section, {})
+        observed_section = observed.get(section, {})
+        if not isinstance(expected_section, dict) or not isinstance(observed_section, dict):
+            raise RuntimeError(f"APA-B engine provenance lacks {section}")
+        if str(observed_section.get(field, "")).lower() != str(expected_section.get(field, "")).lower():
+            raise RuntimeError(f"APA-B engine provenance does not match accepted {section}.{field}")
+    if observed.get("umi_present") is not False or observed.get("coordinate_deduplication") is not False:
+        raise RuntimeError("APA-B engine provenance violates the accepted no-UMI/no-dedup contract")
 
 
 def _header(path: Path) -> list[str]:
@@ -60,9 +130,12 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
     template = str(settings.get("command_template", "")).strip()
     if not template:
         raise RuntimeError("apa_b.command_template is required for the pinned local PolyAseqTrap installation")
+    validation_path = Path(str(settings.get("validation_manifest", "")))
+    installation_path = Path(str(settings.get("installation_manifest", "")))
+    accepted_validation = _validation_manifest(validation_path, list(plan.references))
     bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples]
     ref_inputs = [Path(plan.reference_for(genome)[key]) for genome in plan.references for key in ("fasta", "gtf")]
-    signature = signature_for([*bams, *ref_inputs], {
+    signature = signature_for([*bams, *ref_inputs, validation_path, installation_path], {
         "module": "apa_b", "settings": settings, "samples": plan.samples,
         "contrasts": plan.contrasts, "reporting": plan.project.get("reporting", {}),
     }) if not dry_run else "dry-run"
@@ -88,7 +161,20 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
             writer.writerows((sample["sample_id"], bam) for sample, bam in zip(samples, genome_bams))
         replacements = {"bam_manifest": str(manifest), "fasta": reference["fasta"],
                         "gtf": reference["gtf"], "outdir": str(genome_dir),
-                        "species": reference["species"], "assembly": reference["assembly"]}
+                        "species": reference["species"], "assembly": reference["assembly"],
+                        "threads": str(plan.project["resources"]["apa_b"]["engine_threads"]),
+                        "validation_manifest": str(validation_path),
+                        "installation_manifest": str(settings.get("installation_manifest", "")),
+                        "apa_b_executable": str(
+                            Path(str(settings.get("installation_manifest", ""))).parent
+                            / "bin" / "rna-ends2tracks-apa-b"
+                        )}
+        if template.lower() == "auto":
+            template = (
+                "{apa_b_executable} --bam-manifest {bam_manifest} --fasta {fasta} --gtf {gtf} "
+                "--species {species} --assembly {assembly} --outdir {outdir} --threads {threads} "
+                "--validation-manifest {validation_manifest} --installation-manifest {installation_manifest}"
+            )
         try:
             command = shlex.split(template.format(**replacements))
         except KeyError as exc:
@@ -99,7 +185,10 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         catalog = genome_dir / "pas_catalog.tsv"
         counts = genome_dir / "pas_counts.tsv"
         deepip = genome_dir / "deepip_audit.tsv"
+        engine_provenance = genome_dir / "engine_provenance.json"
+        adapter_audit = genome_dir / "adapter_audit.json"
         _validate_polyaseqtrap_outputs(catalog, counts, deepip, [sample["sample_id"] for sample in samples])
+        _validate_engine_provenance(engine_provenance, accepted_validation, genome)
         stats_dir = genome_dir / "drimseq"
         index = stats_dir / "result_index.tsv"
         genome_plan = RunPlan(plan.project, samples,
@@ -116,7 +205,7 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
             receipt_root=stats_dir / ".receipts", index_path=index,
             parallel_jobs=plan.project["resources"]["apa_b"]["contrast_parallel_jobs"],
             threads=1, memory_gb=plan.project["resources"]["apa_b"]["contrast_memory_gb"],
-            output_suffixes=[".drimseq_stager.tsv", ".gene_screen.tsv"],
+            output_suffixes=[".drimseq_stager.tsv", ".gene_screen.tsv", ".gene_apa_summary.tsv"],
             signature_inputs=[counts, catalog], signature_parameters={
                 "genome": genome, "design": plan.project["design"],
                 "reporting": plan.project["reporting"], "settings": settings,
@@ -129,11 +218,16 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         _filter_pcpa(pcpa_catalog, catalog, index, pcpa_result,
                      float(plan.project["reporting"]["fdr"]),
                      float(plan.project["reporting"]["min_abs_delta_pau"]))
-        outputs.extend([manifest, catalog, counts, deepip, index, pcpa_catalog, pcpa_result])
+        outputs.extend([
+            manifest, catalog, counts, deepip, engine_provenance, adapter_audit, index,
+            pcpa_catalog, pcpa_result,
+        ])
         with index.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
-                outputs.extend([Path(row["result_file"]),
-                                stats_dir / f"{row['contrast_id']}.gene_screen.tsv"])
+                outputs.extend([
+                    Path(row["result_file"]), Path(row["gene_screen_file"]),
+                    Path(row["gene_summary_file"]),
+                ])
     if dry_run:
         event(log_dir, "apa_b", "dry_run", "Would run independent genome-specific APA-B and DRIMSeq/stageR")
         return

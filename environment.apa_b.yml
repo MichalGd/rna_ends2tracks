@@ -1,0 +1,28 @@
+name: rna_ends2tracks-apa-b-v1
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.9
+  - pip
+  - pysam=0.23
+  - numpy=1.23
+  - pandas=1.5
+  - scikit-learn=1.2
+  - tensorflow=2.10
+  - keras=2.10
+  - h5py=3.7
+  - r-base=4.3
+  - bioconductor-rsamtools
+  - bioconductor-biostrings
+  - bioconductor-genomicranges
+  - bioconductor-iranges
+  - bioconductor-biocgenerics
+  - bioconductor-limma
+  - r-stringr
+  - r-plyr
+  - r-dplyr
+  - r-tibble
+  - r-outliers
+  - r-pbmcapply
+  - r-stringdist

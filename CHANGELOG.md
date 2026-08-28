@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Add embedded C4 PCA and sample-distance figures plus per-contrast MA and volcano plots in PDF/PNG.
+- Add bounded, receipt-backed DGE/APA-A/PCPA and validated APA-B ORA/GSEA using GO, Reactome, and Hallmark gene sets with mapping/database provenance.
+- Add a complete provenance dashboard covering configuration and samplesheet checksums, references/PAS atlases, stage receipts, environment packages, executable versions, and all output files.
+- Require an accepted APA-B validation manifest and matching run-specific engine provenance before producing or interpreting APA-B results.
+- Add a pinned, separately installable PolyAseqTrap/DeepIP APA-B adapter for QuantSeq REV: genome-wide weighted endpoint/PAC clustering, species-specific DeepIP filtering, intragenic PCPA eligibility, model/environment provenance, automated `config.conf` resolution, and synthetic/real-canary acceptance manifests.
+
+- Run CPU-bound per-sample exact-end extraction and mixed Python/native track generation in bounded process pools so configured parallel jobs can use multiple CPU cores.
+- Add an internal chronological master log, atomic run-status snapshot, and `rna-ends2tracks status` command.
+- Record native-command and stage lifecycle events while retaining detailed per-tool logs.
+- Explain the workflow-specific C0-C5 count universes in a beginner-facing data-stage guide.
+- Split early C0 raw/CPM tracks from end-derived tracks with independent receipts and one strand-BAM extraction per sample/strand.
+- Report completed/total work, elapsed time, and approximate ETA for bounded lane, sample, track, and contrast pools in the chronological master log.
+- Start raw/CPM C0 tracks as each final sample BAM is published during merging, using only CPU/RAM capacity left after reserving the configured merge pool; defer automatically when no safe overlap capacity remains.
+- Add a real tabular scientific HTML report and machine-readable per-contrast summary covering DGE direction, APA-A sites/shifts/PCPA, optional APA-B, and method concordance; abort reporting if source indexes disagree with result tables.
+- Generate a one-column BigWig collection inventory, per-collection and combined one-line UCSC custom-track descriptors, distinct collection colors, configurable public URLs/minus-track display, and an IGV session during every report stage.
+- Expand the HTML report with validated samples, STAR mapping, QuantSeq REV orientation, C0-C2R filtering funnels, active-PAS assignment, a searchable contrast table, track collection counts, and direct links to major QC and result indexes.
+
 ## 0.1.0-alpha.9.post2 - 2026-08-27
 
 - Fix APA-A metadata mapping and fallback-comparator selection when DEXSeq returns factor-valued feature IDs: coerce PAS IDs to character and resolve them explicitly against the active-PAS catalog and named project C3 counts.
