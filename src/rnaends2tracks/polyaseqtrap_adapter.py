@@ -165,6 +165,28 @@ def _run(command: list[str], log: Path) -> None:
         subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, check=True)
 
 
+def environment_executable(name: str) -> str:
+    """Resolve a tool from the same immutable environment as this Python."""
+    environment_bin = Path(sys.executable).resolve().parent
+    candidates = (environment_bin / name, environment_bin / f"{name}.exe")
+    executable = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if executable is None:
+        raise RuntimeError(
+            f"Required APA-B executable is absent beside {sys.executable}: {name}"
+        )
+    return str(executable)
+
+
+def r_subprocess_environment() -> dict[str, str]:
+    """Remove parent-shell R overrides and prioritize the APA-B environment."""
+    environment = os.environ.copy()
+    for variable in ("R_HOME", "R_LIBS", "R_LIBS_USER"):
+        environment.pop(variable, None)
+    environment_bin = str(Path(sys.executable).resolve().parent)
+    environment["PATH"] = environment_bin + os.pathsep + environment.get("PATH", "")
+    return environment
+
+
 def _truth(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
@@ -379,9 +401,17 @@ def execute(args: argparse.Namespace) -> int:
         ends = sample_work / "exact_end_counts.tsv"
         audits[sample] = extract_end_counts(Path(row["bam"]), ends)
         output = sample_work / "polyaseqtrap_candidates.tsv"
-        _run(["Rscript", str(r_script), "--ends", str(ends), "--fasta", str(Path(args.fasta).resolve()),
-              "--output", str(output), "--audit", str(sample_work / "polyaseqtrap_audit.tsv"),
-              "--cluster-gap", str(args.cluster_gap)], sample_work / "polyaseqtrap.log")
+        command = [environment_executable("Rscript"), str(r_script), "--ends", str(ends),
+                   "--fasta", str(Path(args.fasta).resolve()), "--output", str(output),
+                   "--audit", str(sample_work / "polyaseqtrap_audit.tsv"),
+                   "--cluster-gap", str(args.cluster_gap)]
+        log = sample_work / "polyaseqtrap.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("w", encoding="utf-8") as handle:
+            handle.write("COMMAND: " + subprocess.list2cmdline(command) + "\n")
+            handle.flush()
+            subprocess.run(command, env=r_subprocess_environment(), stdout=handle,
+                           stderr=subprocess.STDOUT, check=True)
         return sample, output
 
     candidate_rows: list[Candidate] = []

@@ -4,6 +4,7 @@ import csv
 import hashlib
 import tempfile
 import unittest
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,14 +14,42 @@ from rnaends2tracks.polyaseqtrap_adapter import (
     Candidate,
     cluster_candidates,
     extract_end_counts,
+    environment_executable,
     parser,
     parse_deepip,
+    r_subprocess_environment,
     verify_installation,
     write_outputs,
 )
 
 
 class PolyAseqTrapAdapterTests(unittest.TestCase):
+    def test_rscript_is_resolved_beside_running_apa_b_python(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            python = root / "python"
+            rscript = root / "Rscript"
+            python.write_text("", encoding="utf-8")
+            rscript.write_text("", encoding="utf-8")
+            with patch("rnaends2tracks.polyaseqtrap_adapter.sys.executable", str(python)):
+                self.assertEqual(environment_executable("Rscript"), str(rscript.resolve()))
+
+    def test_r_environment_removes_parent_overrides_and_prioritizes_apa_b_bin(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            python = Path(directory) / "python"
+            python.write_text("", encoding="utf-8")
+            parent = {
+                "PATH": os.pathsep.join(("parent", "bin")),
+                "R_HOME": "wrong", "R_LIBS": "wrong", "R_LIBS_USER": "wrong",
+            }
+            with patch("rnaends2tracks.polyaseqtrap_adapter.sys.executable", str(python)), \
+                    patch.dict("rnaends2tracks.polyaseqtrap_adapter.os.environ", parent, clear=True):
+                environment = r_subprocess_environment()
+            self.assertEqual(environment["PATH"].split(os.pathsep)[0], str(python.parent.resolve()))
+            self.assertNotIn("R_HOME", environment)
+            self.assertNotIn("R_LIBS", environment)
+            self.assertNotIn("R_LIBS_USER", environment)
+
     def test_pilot_mode_does_not_require_an_already_accepted_manifest(self) -> None:
         args = parser().parse_args([
             "--bam-manifest", "bams.tsv", "--fasta", "genome.fa", "--gtf", "genes.gtf",

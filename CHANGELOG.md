@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.10.post3 - 2026-08-28
+
+- Resolve `Rscript` from the same immutable APA-B environment as the running adapter instead of relying on the caller's `PATH`.
+- Remove inherited R library overrides from PolyAseqTrap subprocesses so both the synthetic pilot and production adapter use the pinned, installation-tested R package library.
+
 ## 0.1.0-alpha.10.post2 - 2026-08-28
 
 - Add a reproducible synthetic APA-B coordinate, strand, count-conservation, duplicate-retention, intragenic-site, PolyAseqTrap-clustering, and pinned DeepIP truth-set pilot command.
