@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.10.post6 - 2026-08-28
+
+- Keep paired APA-B contrasts on the resolved `~ subject + condition` model and explicitly use DRIMSeq's regression path for multifactor designs.
+- Make DRIMSeq fitting reproducible with contrast-specific deterministic seeds.
+- Retry only recognized multifactor numerical zero-pattern failures with DRIMSeq's documented `add_uniform=TRUE` safeguard, recording the original failure and selected policy in a per-contrast fit audit.
+
 ## 0.1.0-alpha.10.post5 - 2026-08-28
 
 - Allow subset NA p-values from DRIMSeq to remain explicitly untestable during stageR adjustment instead of aborting every APA-B contrast.
