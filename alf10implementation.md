@@ -74,7 +74,7 @@ APA-B should remain disabled until the separate APA-B installation and the site-
 RUN_APA_B=true
 APA_B_PILOT_ACCEPTED=true
 APA_B_COMMAND_TEMPLATE="auto"
-APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post3/installation_manifest.json"
+APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post4/installation_manifest.json"
 APA_B_VALIDATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-validation/accepted_GRCm39.json"
 APA_B_THREADS=8
 ```
@@ -99,7 +99,7 @@ At the time of this record, the complete-environment GitHub job and the server-s
 3. Install the separate APA-B environment on the server:
 
    ```bash
-   bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post3
+   bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post4
    ```
 
 4. Run the synthetic pilot, verifying coordinate, strand, count, clustering, and DeepIP invariants.

@@ -133,6 +133,8 @@ def _extract_sample(plan: RunPlan, results: Path, sample: dict[str, str], force:
                     audit["duplicate_flagged"] += 1
                 if not eligible:
                     continue
+                if read.is_duplicate:
+                    audit["duplicate_flagged_C0"] += 1
                 position, strand, clipped = transcript_end(read)
                 key = (read.reference_name, strand, position)
                 if clipped:

@@ -5,13 +5,21 @@
   "type": "object",
   "additionalProperties": true,
   "required": [
-    "schema_version", "status", "engine", "models", "environment",
+    "schema_version", "status", "workflow_adapter", "engine", "models", "environment",
     "assemblies", "library_protocols", "umi_present", "coordinate_deduplication",
     "quantseq_rev_adaptation", "pilot", "reviewed_by", "accepted_at"
   ],
   "properties": {
     "schema_version": {"const": 1},
     "status": {"const": "accepted"},
+    "workflow_adapter": {
+      "type": "object",
+      "required": ["release", "source_commit"],
+      "properties": {
+        "release": {"type": "string", "minLength": 1},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-fA-F]{7,40}$"}
+      }
+    },
     "engine": {
       "type": "object",
       "required": ["name", "source_commit"],
@@ -41,9 +49,10 @@
     "quantseq_rev_adaptation": {"const": "genomewide_no_tail_weighted_PAC"},
     "pilot": {
       "type": "object",
-      "required": ["synthetic_pass", "real_quantseq_rev_canaries"],
+      "required": ["synthetic_pass", "c1_c1s_reuse_equivalent", "real_quantseq_rev_canaries"],
       "properties": {
         "synthetic_pass": {"const": true},
+        "c1_c1s_reuse_equivalent": {"const": true},
         "real_quantseq_rev_canaries": {"type": "object", "additionalProperties": {"const": "PASS"}}
       }
     },

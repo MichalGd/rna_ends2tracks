@@ -6,7 +6,7 @@ Install releases side-by-side into a writable shared environment parent. Do not 
 git clone https://github.com/MichalGd/rna_ends2tracks.git
 cd rna_ends2tracks
 bash scripts/bash/install_release.sh \
-  --tag v0.1.0-alpha.10.post3 \
+  --tag v0.1.0-alpha.10.post4 \
   --env-parent /opt/conda_envs \
   --bin-dir /opt/conda_envs/bin \
   --mamba /opt/miniconda/condabin/mamba
@@ -23,10 +23,10 @@ Reference FASTA/GTF/STAR/atlas assets remain shared read-only inputs and are not
 Install the pinned PolyAseqTrap/DeepIP branch separately after the main alpha.10 release:
 
 ```bash
-bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post3
+bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post4
 ```
 
-This creates a release-specific environment such as `/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post3` without changing the stable main launcher. It is safe to install beside an active main-workflow run if disk and memory headroom are adequate. APA-B remains disabled until the synthetic pilot and a real QuantSeq REV canary for each intended assembly pass. Follow [the APA-B pilot contract](POLYASEQTRAP_ADAPTER_CONTRACT.md); do not set `APA_B_PILOT_ACCEPTED=true` merely because installation succeeded.
+This creates a release-specific environment such as `/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post4` without changing the stable main launcher. It is safe to install beside an active main-workflow run if disk and memory headroom are adequate. APA-B remains disabled until the synthetic pilot and a real QuantSeq REV canary for each intended assembly pass. Follow [the APA-B pilot contract](POLYASEQTRAP_ADAPTER_CONTRACT.md); do not set `APA_B_PILOT_ACCEPTED=true` merely because installation succeeded.
 
 Rollback changes only the stable symlink:
 

@@ -35,6 +35,7 @@ trap 'rm -rf -- "$SOURCE_DIR"' EXIT
 git clone --depth 1 --branch "$TAG" https://github.com/MichalGd/rna_ends2tracks.git "$SOURCE_DIR/workflow"
 git -C "$SOURCE_DIR/workflow" fetch --depth 1 origin "$TAG"
 git -C "$SOURCE_DIR/workflow" checkout --detach "$TAG"
+WORKFLOW_COMMIT="$(git -C "$SOURCE_DIR/workflow" rev-parse HEAD)"
 
 export MAMBA_ROOT_PREFIX
 MAMBA_CHANNEL_PRIORITY=strict nice -n 10 "$MAMBA" --no-rc env create \
@@ -72,9 +73,10 @@ LOCK_SHA256="$(sha256sum "$LOCK" | awk '{print $1}')"
 INSTALLATION_MANIFEST="$PREFIX/installation_manifest.json"
 "$PREFIX/bin/python" -c '
 import json,sys
-path,engine,deepip,script,human,human_sha,mouse,mouse_sha,lock,lock_sha=sys.argv[1:]
+path,release,adapter_commit,engine,deepip,script,human,human_sha,mouse,mouse_sha,lock,lock_sha=sys.argv[1:]
 payload={
  "schema_version":1,
+ "workflow_adapter":{"release":release,"source_commit":adapter_commit},
  "engine":{"name":"PolyAseqTrap","source_commit":engine},
  "deepip":{"name":"DeepIP","source_commit":deepip,"script":script},
  "models":{"human":{"path":human,"sha256":human_sha},"mouse":{"path":mouse,"sha256":mouse_sha}},
@@ -82,7 +84,7 @@ payload={
  "status":"installed_not_pilot_accepted"
 }
 open(path,"w",encoding="utf-8").write(json.dumps(payload,indent=2,sort_keys=True)+"\n")
-' "$INSTALLATION_MANIFEST" "$POLYASEQTRAP_COMMIT" "$DEEPIP_COMMIT" \
+' "$INSTALLATION_MANIFEST" "$TAG" "$WORKFLOW_COMMIT" "$POLYASEQTRAP_COMMIT" "$DEEPIP_COMMIT" \
   "$DEEPIP_ROOT/DeepIP_test.py" "$HUMAN_MODEL" "$HUMAN_MODEL_SHA256" \
   "$MOUSE_MODEL" "$MOUSE_MODEL_SHA256" "$LOCK" "$LOCK_SHA256"
 

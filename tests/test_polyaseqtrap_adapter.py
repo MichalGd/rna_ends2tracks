@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import hashlib
+import json
+import os
 import tempfile
 import unittest
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,12 +20,81 @@ from rnaends2tracks.polyaseqtrap_adapter import (
     parser,
     parse_deepip,
     r_subprocess_environment,
+    reuse_exact_end_counts,
     verify_installation,
     write_outputs,
 )
 
 
 class PolyAseqTrapAdapterTests(unittest.TestCase):
+    def test_receipt_validated_c1_plus_c1s_reconstructs_raw_endpoint_universe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            c1 = root / "C1_exact_ends.tsv.gz"
+            c1s = root / "C1S_uncertain_ends.tsv.gz"
+            audit = root / "end_audit.json"
+            for path, rows in (
+                (c1, ["chr1\t100\t101\t+\t3", "chr1\t200\t201\t-\t2"]),
+                (c1s, ["chr1\t100\t101\t+\t1", "chr2\t300\t301\t+\t4"]),
+            ):
+                with gzip.open(path, "wt", encoding="utf-8") as handle:
+                    handle.write("chrom\tstart\tend\tstrand\tcount\n" + "\n".join(rows) + "\n")
+            audit.write_text(json.dumps({
+                "sample_id": "S1", "C0": 10, "C1": 5, "C1S": 5,
+                "duplicate_flagged": 4, "duplicate_flagged_C0": 2,
+            }), encoding="utf-8")
+            receipt_dir = root / ".receipt"
+            receipt_dir.mkdir()
+            outputs = []
+            for path in (c1, c1s, audit):
+                outputs.append({
+                    "path": str(path.resolve()), "size": path.stat().st_size,
+                    "validation": "sha256", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                })
+            receipt = receipt_dir / "run_receipt.json"
+            receipt.write_text(json.dumps({
+                "module": "exact_ends_sample", "exit_status": 0, "outputs": outputs,
+            }), encoding="utf-8")
+            target = root / "adapter_ends.tsv"
+            observed = reuse_exact_end_counts({
+                "sample_id": "S1", "c1": str(c1), "c1s": str(c1s),
+                "exact_end_audit": str(audit), "exact_end_receipt": str(receipt),
+            }, target)
+            self.assertEqual(observed["records_written"], 10)
+            self.assertEqual(observed["end_soft_clipped_records_included"], 5)
+            self.assertEqual(observed["duplicate_flagged_records_retained"], 2)
+            self.assertEqual(observed["duplicate_flagged_count_scope"], "C0")
+            self.assertEqual(observed["endpoint_source"], "receipt_validated_C1_plus_C1S")
+            with target.open(encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle, delimiter="\t"))
+            self.assertIn({"chrom": "chr1", "position": "100", "strand": "+", "count": "4"}, rows)
+            self.assertEqual(sum(int(row["count"]) for row in rows), 10)
+
+    def test_reusable_endpoint_checksum_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = [root / name for name in ("C1_exact_ends.tsv.gz", "C1S_uncertain_ends.tsv.gz")]
+            for path in paths:
+                with gzip.open(path, "wt", encoding="utf-8") as handle:
+                    handle.write("chrom\tstart\tend\tstrand\tcount\nchr1\t1\t2\t+\t1\n")
+            audit = root / "end_audit.json"
+            audit.write_text('{"sample_id":"S1","C0":2,"C1":1,"C1S":1}', encoding="utf-8")
+            receipt_dir = root / ".receipt"; receipt_dir.mkdir()
+            outputs = [{
+                "path": str(path.resolve()), "size": path.stat().st_size,
+                "validation": "sha256", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            } for path in (*paths, audit)]
+            receipt = receipt_dir / "run_receipt.json"
+            receipt.write_text(json.dumps({
+                "module": "exact_ends_sample", "exit_status": 0, "outputs": outputs,
+            }), encoding="utf-8")
+            audit.write_text('{"sample_id":"S1","C0":3,"C1":1,"C1S":2}', encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "checksum"):
+                reuse_exact_end_counts({
+                    "sample_id": "S1", "c1": str(paths[0]), "c1s": str(paths[1]),
+                    "exact_end_audit": str(audit), "exact_end_receipt": str(receipt),
+                }, root / "out.tsv")
+
     def test_rscript_is_resolved_beside_running_apa_b_python(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -49,6 +120,8 @@ class PolyAseqTrapAdapterTests(unittest.TestCase):
             self.assertNotIn("R_HOME", environment)
             self.assertNotIn("R_LIBS", environment)
             self.assertNotIn("R_LIBS_USER", environment)
+            self.assertEqual(environment["OMP_NUM_THREADS"], "1")
+            self.assertEqual(environment["OPENBLAS_NUM_THREADS"], "1")
 
     def test_pilot_mode_does_not_require_an_already_accepted_manifest(self) -> None:
         args = parser().parse_args([
@@ -65,6 +138,7 @@ class PolyAseqTrapAdapterTests(unittest.TestCase):
             script = root / "DeepIP_test.py"; script.write_text("# pilot\n", encoding="utf-8")
             digest = hashlib.sha256(model.read_bytes()).hexdigest()
             installation = {
+                "workflow_adapter": {"release": "v0.1.0-alpha.10.post4", "source_commit": "7654321"},
                 "engine": {"source_commit": "176ea2884ff1c6be7c64bc44fa7661d82d90e718"},
                 "deepip": {"source_commit": "988564875d002b6d5d48d8dfb228cba3492dd776",
                            "script": str(script)},
@@ -77,6 +151,14 @@ class PolyAseqTrapAdapterTests(unittest.TestCase):
             self.assertEqual(observed_model, model)
             self.assertEqual(observed_script, script)
             self.assertEqual(environment, "a" * 64)
+
+    def test_pilot_installation_rejects_missing_workflow_adapter_pin(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "workflow-adapter"):
+            verify_installation({
+                "engine": {"source_commit": "176ea2884ff1c6be7c64bc44fa7661d82d90e718"},
+                "deepip": {"source_commit": "988564875d002b6d5d48d8dfb228cba3492dd776"},
+                "models": {}, "environment": {},
+            }, "mouse")
 
     def test_project_clustering_is_weighted_and_strand_deterministic(self) -> None:
         rows = [

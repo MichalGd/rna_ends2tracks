@@ -25,11 +25,15 @@ def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
     if payload.get("schema_version") != 1 or payload.get("status") != "accepted":
         raise RuntimeError("APA-B validation manifest must have schema_version=1 and status=accepted")
     engine = payload.get("engine", {})
+    workflow_adapter = payload.get("workflow_adapter", {})
     model = payload.get("model", {})
     models = payload.get("models", {})
     environment = payload.get("environment", {})
     if not isinstance(engine, dict) or not re.fullmatch(r"[0-9a-fA-F]{7,40}", str(engine.get("source_commit", ""))):
         raise RuntimeError("APA-B validation manifest requires a pinned engine.source_commit")
+    if (not isinstance(workflow_adapter, dict)
+            or not re.fullmatch(r"[0-9a-fA-F]{7,40}", str(workflow_adapter.get("source_commit", "")))):
+        raise RuntimeError("APA-B validation manifest requires a pinned workflow_adapter.source_commit")
     if not model and isinstance(models, dict) and models:
         model = next(iter(models.values()))
     for label, record in (("model/models", model), ("environment", environment)):
@@ -52,8 +56,9 @@ def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
     if missing:
         raise RuntimeError("APA-B validation does not cover assemblies: " + ", ".join(missing))
     pilot = payload.get("pilot", {})
-    if not isinstance(pilot, dict) or pilot.get("synthetic_pass") is not True:
-        raise RuntimeError("APA-B validation requires a passing synthetic coordinate/strand pilot")
+    if (not isinstance(pilot, dict) or pilot.get("synthetic_pass") is not True
+            or pilot.get("c1_c1s_reuse_equivalent") is not True):
+        raise RuntimeError("APA-B validation requires passing synthetic and C1+C1S equivalence pilots")
     real_canaries = pilot.get("real_quantseq_rev_canaries", {})
     if not isinstance(real_canaries, dict) or any(real_canaries.get(genome) != "PASS" for genome in genomes):
         raise RuntimeError("APA-B validation requires a passing real QuantSeq REV canary for every assembly")
@@ -69,7 +74,8 @@ def _validate_engine_provenance(path: Path, accepted: dict[str, object], assembl
     observed = json.loads(path.read_text(encoding="utf-8"))
     if observed.get("assembly") != assembly:
         raise RuntimeError(f"APA-B engine provenance assembly mismatch: {observed.get('assembly')} != {assembly}")
-    for section, field in (("engine", "source_commit"), ("model", "sha256"), ("environment", "sha256")):
+    for section, field in (("workflow_adapter", "source_commit"), ("engine", "source_commit"),
+                           ("model", "sha256"), ("environment", "sha256")):
         if section == "model" and isinstance(accepted.get("models"), dict):
             expected_section = accepted["models"].get(str(observed.get("species", "")), accepted.get("model", {}))
         else:
@@ -134,8 +140,23 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
     installation_path = Path(str(settings.get("installation_manifest", "")))
     accepted_validation = _validation_manifest(validation_path, list(plan.references))
     bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples]
+    endpoint_inputs = [
+        results / "03_exact_ends" / sample["genome"] / sample["sample_id"] / filename
+        for sample in plan.samples
+        for filename in ("C1_exact_ends.tsv.gz", "C1S_uncertain_ends.tsv.gz", "end_audit.json")
+    ]
+    endpoint_receipts = [
+        results / "03_exact_ends" / sample["genome"] / sample["sample_id"] / ".receipt" / "run_receipt.json"
+        for sample in plan.samples
+    ]
     ref_inputs = [Path(plan.reference_for(genome)[key]) for genome in plan.references for key in ("fasta", "gtf")]
-    signature = signature_for([*bams, *ref_inputs, validation_path, installation_path], {
+    reusable_inputs = [*endpoint_inputs, *endpoint_receipts]
+    signature_inputs = [*ref_inputs, validation_path, installation_path]
+    if settings.get("endpoint_source", "auto") != "bam" and all(path.is_file() for path in reusable_inputs):
+        signature_inputs.extend(reusable_inputs)
+    else:
+        signature_inputs.extend(bams)
+    signature = signature_for(signature_inputs, {
         "module": "apa_b", "settings": settings, "samples": plan.samples,
         "contrasts": plan.contrasts, "reporting": plan.project.get("reporting", {}),
     }) if not dry_run else "dry-run"
@@ -157,12 +178,24 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         genome_bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in samples]
         with manifest.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-            writer.writerow(["sample_id", "bam"])
-            writer.writerows((sample["sample_id"], bam) for sample, bam in zip(samples, genome_bams))
+            writer.writerow(["sample_id", "bam", "c1", "c1s", "exact_end_audit", "exact_end_receipt"])
+            for sample, bam in zip(samples, genome_bams):
+                exact_root = results / "03_exact_ends" / genome / sample["sample_id"]
+                writer.writerow([
+                    sample["sample_id"], bam,
+                    exact_root / "C1_exact_ends.tsv.gz",
+                    exact_root / "C1S_uncertain_ends.tsv.gz",
+                    exact_root / "end_audit.json",
+                    exact_root / ".receipt" / "run_receipt.json",
+                ])
         replacements = {"bam_manifest": str(manifest), "fasta": reference["fasta"],
                         "gtf": reference["gtf"], "outdir": str(genome_dir),
                         "species": reference["species"], "assembly": reference["assembly"],
                         "threads": str(plan.project["resources"]["apa_b"]["engine_threads"]),
+                        "endpoint_source": str(settings.get("endpoint_source", "auto")),
+                        "endpoint_workers": str(plan.project["resources"]["apa_b"]["endpoint_parallel_jobs"]),
+                        "cluster_workers": str(plan.project["resources"]["apa_b"]["cluster_parallel_jobs"]),
+                        "deepip_threads": str(plan.project["resources"]["apa_b"]["deepip_threads"]),
                         "validation_manifest": str(validation_path),
                         "installation_manifest": str(settings.get("installation_manifest", "")),
                         "apa_b_executable": str(
@@ -173,6 +206,8 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
             template = (
                 "{apa_b_executable} --bam-manifest {bam_manifest} --fasta {fasta} --gtf {gtf} "
                 "--species {species} --assembly {assembly} --outdir {outdir} --threads {threads} "
+                "--endpoint-source {endpoint_source} --endpoint-workers {endpoint_workers} "
+                "--cluster-workers {cluster_workers} --deepip-threads {deepip_threads} "
                 "--validation-manifest {validation_manifest} --installation-manifest {installation_manifest}"
             )
         try:
