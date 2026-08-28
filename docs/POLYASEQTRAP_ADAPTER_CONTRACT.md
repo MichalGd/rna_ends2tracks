@@ -33,7 +33,7 @@ Because discovery is genome-wide, an intronic or internal-exonic site far upstre
 APA-B has older deep-learning dependencies and is deliberately isolated from the main workflow environment:
 
 ```bash
-bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10
+bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post1
 ```
 
 The default installation is `/opt/conda_envs/rna_ends2tracks-apa-b-v1`. The script verifies the source/model pins, installs the adapter, exports an explicit environment lock, writes `installation_manifest.json`, and makes the versioned environment read-only. Installation alone does **not** accept the method scientifically.

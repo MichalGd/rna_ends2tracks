@@ -5,18 +5,22 @@ on:
     branches: [main, "feature/**"]
     paths:
       - environment.yml
+      - environment.apa_b.yml
       - .github/workflows/environment.yml
       - pyproject.toml
       - src/**
       - scripts/R/**
+      - scripts/bash/install_apa_b.sh
       - tests/**
   pull_request:
     paths:
       - environment.yml
+      - environment.apa_b.yml
       - .github/workflows/environment.yml
       - pyproject.toml
       - src/**
       - scripts/R/**
+      - scripts/bash/install_apa_b.sh
       - tests/**
   workflow_dispatch:
 
@@ -60,3 +64,25 @@ jobs:
           python -m pip install --no-deps .
           python -m unittest discover -s tests -p 'test_*.py' -v
           Rscript tests/R/deseq2_pairing_smoke.R
+
+  apa-b-environment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-file: environment.apa_b.yml
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: strict
+          cache-downloads: true
+          cache-environment: true
+          post-cleanup: all
+      - name: Verify APA-B R and CPU TensorFlow runtimes
+        shell: micromamba-shell {0}
+        run: |
+          set -euo pipefail
+          python -c 'import keras, tensorflow as tf; assert keras.__version__ == "2.10.0"; assert tf.__version__ == "2.10.1"; assert not tf.config.list_physical_devices("GPU"); print("DeepIP TensorFlow CPU runtime: PASS")'
+          Rscript -e 'packages <- c("Rsamtools", "Biostrings", "GenomicRanges", "IRanges", "limma", "stringr", "plyr", "dplyr", "tibble", "outliers", "pbmcapply", "stringdist"); stopifnot(all(vapply(packages, requireNamespace, logical(1), quietly=TRUE))); print(sessionInfo())'

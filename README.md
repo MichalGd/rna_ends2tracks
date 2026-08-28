@@ -185,7 +185,7 @@ Every report run also creates `10_reports/bigwig_collections.txt`, a one-column 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.10
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.10.post1
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).

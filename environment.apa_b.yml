@@ -3,14 +3,14 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - python=3.9
+  # Python 3.10 is the newest release supported by TensorFlow 2.10 and also
+  # satisfies the workflow package's Python >=3.10 contract.
+  - python=3.10
   - pip
   - pysam=0.23
-  - numpy=1.23
+  - numpy=1.23.5
   - pandas=1.5
   - scikit-learn=1.2
-  - tensorflow=2.10
-  - keras=2.10
   - h5py=3.7
   - r-base=4.3
   - bioconductor-rsamtools
@@ -26,3 +26,10 @@ dependencies:
   - r-outliers
   - r-pbmcapply
   - r-stringdist
+  # The conda-forge TensorFlow 2.10 build requires ICU 70, whereas R 4.3
+  # requires ICU >=72. Install the official CPU wheel after the compatible
+  # Conda R/Python stack is solved. This also follows DeepIP's pip-based
+  # installation instructions and avoids any CUDA dependency.
+  - pip:
+      - tensorflow-cpu==2.10.1
+      - keras==2.10.0

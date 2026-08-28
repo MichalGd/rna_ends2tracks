@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.10.post1 - 2026-08-28
+
+- Resolve the APA-B environment's R/TensorFlow ICU conflict by solving the R 4.3 and Bioconductor stack with Conda while installing the pinned TensorFlow 2.10.1 CPU and Keras 2.10.0 wheels through pip.
+- Verify the CPU-only DeepIP runtime before downloading and installing the pinned PolyAseqTrap and DeepIP sources.
+
+## 0.1.0-alpha.10 - 2026-08-28
+
 - Add embedded C4 PCA and sample-distance figures plus per-contrast MA and volcano plots in PDF/PNG.
 - Add bounded, receipt-backed DGE/APA-A/PCPA and validated APA-B ORA/GSEA using GO, Reactome, and Hallmark gene sets with mapping/database provenance.
 - Add a complete provenance dashboard covering configuration and samplesheet checksums, references/PAS atlases, stage receipts, environment packages, executable versions, and all output files.
