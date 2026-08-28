@@ -26,6 +26,8 @@ The adapter instead:
 7. annotates terminal, internal-exonic, intronic, ambiguous, and intergenic sites against the assembly-matched GTF;
 8. runs DRIMSeq/stageR and separately classifies candidate intragenic PCPA events.
 
+The pinned `simpleCluster()` implementation supplies the official strand-aware cluster ranges and centers. Its scalar global score assignment is not used: the adapter recalculates each PAC's weighted count from that cluster's own `revmap` members and requires exact record-count conservation in the synthetic pilot.
+
 Because discovery is genome-wide, an intronic or internal-exonic site far upstream of the annotated gene end is eligible. Such a QuantSeq signal is a **candidate premature cleavage/polyadenylation event**, not by itself proof of RNA polymerase II termination.
 
 ## Installation
@@ -33,10 +35,10 @@ Because discovery is genome-wide, an intronic or internal-exonic site far upstre
 APA-B has older deep-learning dependencies and is deliberately isolated from the main workflow environment:
 
 ```bash
-bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post1
+bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post2
 ```
 
-The default installation is `/opt/conda_envs/rna_ends2tracks-apa-b-v1`. The script verifies the source/model pins, installs the adapter, exports an explicit environment lock, writes `installation_manifest.json`, and makes the versioned environment read-only. Installation alone does **not** accept the method scientifically.
+The default installation is release-specific, for example `/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post2`. The script verifies the source/model pins, installs the adapter, exports an explicit environment lock, writes `installation_manifest.json`, and makes the versioned environment read-only. Installation alone does **not** accept the method scientifically.
 
 PolyAseqTrap declares GPL-3. The reviewed DeepIP repository does not currently expose a clear software/model license file. Non-commercial research use does not itself resolve missing license terms; the server administrator should record institutional approval or obtain clarification from the authors before redistribution or broader deployment.
 
@@ -44,11 +46,20 @@ PolyAseqTrap declares GPL-3. The reviewed DeepIP repository does not currently e
 
 Before production use, run a synthetic truth set and at least one real QuantSeq REV canary for every assembly that will be enabled. The synthetic audit must confirm strand/base coordinates, count conservation, duplicate-flag retention, DeepIP positive/negative behavior, and retention of an intragenic site. A real canary must produce the five adapter deliverables and conserve eligible records.
 
+Run the synthetic pilot directly from the immutable APA-B environment:
+
+```bash
+APA_B_ENV=/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post2
+"$APA_B_ENV/bin/rna-ends2tracks-run-apa-b-synthetic-pilot" --installation-manifest "$APA_B_ENV/installation_manifest.json" --output /path/to/synthetic_pilot_audit.json
+```
+
+For a pre-acceptance real canary, invoke `rna-ends2tracks-apa-b` with `--pilot-mode`. This mode verifies all installed engine/model checksums and records `pilot_mode=true` in provenance, but does not accept the method. Normal workflow execution never supplies this flag and still requires an accepted validation manifest.
+
 Create the acceptance manifest only after reviewing those results:
 
 ```bash
-/opt/conda_envs/rna_ends2tracks-apa-b-v1/bin/rna-ends2tracks-accept-apa-b-pilot \
-  --installation-manifest /opt/conda_envs/rna_ends2tracks-apa-b-v1/installation_manifest.json \
+/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post2/bin/rna-ends2tracks-accept-apa-b-pilot \
+  --installation-manifest /opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post2/installation_manifest.json \
   --synthetic-audit /path/to/synthetic_pilot_audit.json \
   --real-canary GRCm39=/path/to/mouse_canary/07_apa_b/GRCm39 \
   --reviewed-by "REVIEWER NAME" \
@@ -63,7 +74,7 @@ The builder refuses incomplete audits. Human and mouse may be accepted together 
 RUN_APA_B=true
 APA_B_PILOT_ACCEPTED=true
 APA_B_COMMAND_TEMPLATE="auto"
-APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-v1/installation_manifest.json"
+APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post2/installation_manifest.json"
 APA_B_VALIDATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-validation/accepted_GRCm39.json"
 APA_B_THREADS=8
 ```

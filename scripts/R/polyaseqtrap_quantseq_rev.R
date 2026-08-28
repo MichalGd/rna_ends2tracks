@@ -40,6 +40,15 @@ points <- GenomicRanges::GRanges(
   score = as.numeric(ends$count)
 )
 clusters <- PolyAseqTrap::simpleCluster(points, max.gapwidth = cluster_gap)
+# The pinned simpleCluster implementation assigns sum(extractList(...)) as a
+# scalar and recycles that project-wide total to every cluster. Preserve its
+# official strand-aware ranges and centers, but restore the intended per-PAC
+# weighted count from each cluster's revmap members.
+clusters$score <- vapply(
+  seq_along(clusters$revmap),
+  function(index) sum(points$score[clusters$revmap[[index]]]),
+  numeric(1)
+)
 sites <- as.data.frame(clusters)
 
 # check.repeat is part of the pinned PolyAseqTrap implementation and accepts a

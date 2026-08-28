@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.10.post2 - 2026-08-28
+
+- Add a reproducible synthetic APA-B coordinate, strand, count-conservation, duplicate-retention, intragenic-site, PolyAseqTrap-clustering, and pinned DeepIP truth-set pilot command.
+- Add an explicit pre-acceptance adapter pilot mode for real QuantSeq canaries while preserving mandatory accepted-manifest validation for production execution.
+- Install APA-B environments side-by-side under release-specific prefixes so immutable pilot environments can be upgraded without modification or deletion.
+- Preserve pinned PolyAseqTrap `simpleCluster` ranges and centers while recalculating the intended per-cluster weighted scores from each cluster's `revmap`, preventing the upstream scalar global score from being recycled to every PAC.
+
 ## 0.1.0-alpha.10.post1 - 2026-08-28
 
 - Resolve the APA-B environment's R/TensorFlow ICU conflict by solving the R 4.3 and Bioconductor stack with Conda while installing the pinned TensorFlow 2.10.1 CPU and Keras 2.10.0 wheels through pip.

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pysam
 
@@ -11,12 +13,42 @@ from rnaends2tracks.polyaseqtrap_adapter import (
     Candidate,
     cluster_candidates,
     extract_end_counts,
+    parser,
     parse_deepip,
+    verify_installation,
     write_outputs,
 )
 
 
 class PolyAseqTrapAdapterTests(unittest.TestCase):
+    def test_pilot_mode_does_not_require_an_already_accepted_manifest(self) -> None:
+        args = parser().parse_args([
+            "--bam-manifest", "bams.tsv", "--fasta", "genome.fa", "--gtf", "genes.gtf",
+            "--species", "mouse", "--assembly", "GRCm39", "--outdir", "pilot", "--pilot-mode",
+        ])
+        self.assertTrue(args.pilot_mode)
+        self.assertEqual(args.validation_manifest, "")
+
+    def test_pilot_installation_verification_checks_pinned_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "mouse.hdf5"; model.write_bytes(b"model")
+            script = root / "DeepIP_test.py"; script.write_text("# pilot\n", encoding="utf-8")
+            digest = hashlib.sha256(model.read_bytes()).hexdigest()
+            installation = {
+                "engine": {"source_commit": "176ea2884ff1c6be7c64bc44fa7661d82d90e718"},
+                "deepip": {"source_commit": "988564875d002b6d5d48d8dfb228cba3492dd776",
+                           "script": str(script)},
+                "models": {"mouse": {"path": str(model), "sha256": digest}},
+                "environment": {"sha256": "a" * 64},
+            }
+            with patch("rnaends2tracks.polyaseqtrap_adapter.DEEPIP_MODEL_SHA256",
+                       {"human": "b" * 64, "mouse": digest}):
+                observed_model, observed_script, environment = verify_installation(installation, "mouse")
+            self.assertEqual(observed_model, model)
+            self.assertEqual(observed_script, script)
+            self.assertEqual(environment, "a" * 64)
+
     def test_project_clustering_is_weighted_and_strand_deterministic(self) -> None:
         rows = [
             Candidate("chr1", "+", 100, {"A": 5}, {"L1"}, False, 1),
