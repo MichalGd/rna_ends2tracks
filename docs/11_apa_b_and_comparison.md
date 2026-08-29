@@ -20,3 +20,9 @@ Agreement is supportive evidence, not a replacement for inspecting read coverage
 DRIMSeq can legitimately return `NA` p-values for genes or PAS whose usage hypothesis cannot be estimated from the available counts. APA-B does not convert these values to zero, one, or statistical significance. Before stageR adjustment, it retains only genes with a finite screening p-value and at least two PAS with finite confirmation p-values. Excluded hypotheses remain `NA` in the complete result table. The supported stageR `allowNA=TRUE` policy is also enabled defensively.
 
 Each contrast writes `<contrast>.na_audit.tsv`. This records the total and `NA` screening and confirmation tests, the numbers of genes and sites admitted to stageR, and the number of adjusted `NA` values. It also records the fixed policy `untestable hypotheses remain NA and cannot be significant`. A contrast with no testable stageR hypotheses fails with an actionable error instead of producing an empty success result.
+
+## Paired-model numerical safeguards
+
+Paired contrasts retain the resolved `~ subject + condition` design and use DRIMSeq's regression path rather than a one-way shortcut. Every contrast uses a deterministic seed. If, and only if, a multifactor fit fails with a recognized DRIMSeq numerical zero-pattern error, the complete fit is retried with DRIMSeq's documented `add_uniform=TRUE` option. This adds a reproducible sub-count perturbation to zeros for numerical fitting; it does not change the integer PAS matrix on disk, remove subjects, or replace the paired design with an unpaired model.
+
+Each contrast writes `<contrast>.fit_audit.tsv`. `fit_policy=standard` means no retry was required. `fit_policy=deterministic_add_uniform_retry` records the fallback, seed, original error, and `WARN_NUMERIC_RETRY` status so the event remains visible in provenance and review.

@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use rna_ends2tracks, cite this software and the analytical tools used by the selected modules."
 title: "rna_ends2tracks"
 type: software
-version: 0.1.0-alpha.10.post5
+version: 0.1.0-alpha.10.post6
 authors:
   - family-names: Gdula
     given-names: Michal

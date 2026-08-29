@@ -101,6 +101,73 @@ stagewise_with_na_policy <- function(gene_result, feature_result, alpha) {
   list(adjusted=unname(stage_adjusted), audit=audit)
 }
 
+contrast_seed <- function(contrast_id) {
+  codepoints <- utf8ToInt(as.character(contrast_id))
+  if (!length(codepoints)) return(104729L)
+  as.integer((sum(codepoints * seq_along(codepoints)) %% 2147483000) + 1)
+}
+
+fit_drimseq_with_numeric_retry <- function(d, design, condition_coef, contrast_id, multifactor) {
+  seed <- contrast_seed(contrast_id)
+  one_way <- !isTRUE(multifactor)
+
+  fit_once <- function(add_uniform) {
+    set.seed(seed)
+    fitted <- dmPrecision(
+      d, design=design, one_way=one_way, add_uniform=add_uniform
+    )
+    set.seed(seed)
+    fitted <- dmFit(
+      fitted, design=design, one_way=one_way, add_uniform=add_uniform
+    )
+    dmTest(fitted, coef=condition_coef, one_way=one_way)
+  }
+
+  primary_error <- NULL
+  fitted <- tryCatch(
+    fit_once(FALSE),
+    error=function(error) {
+      primary_error <<- conditionMessage(error)
+      NULL
+    }
+  )
+  policy <- "standard"
+
+  if (is.null(fitted)) {
+    recognized_numeric_failure <- grepl(
+      "BiocParallel errors|non-finite value supplied by optim|NaNs produced|optimHess",
+      primary_error
+    )
+    if (!isTRUE(multifactor) || !recognized_numeric_failure) {
+      stop(primary_error, call.=FALSE)
+    }
+    warning(sprintf(
+      paste0(
+        "DRIMSeq numerical zero-pattern failure for multifactor contrast %s; ",
+        "retrying deterministically with documented add_uniform=TRUE"
+      ),
+      contrast_id
+    ))
+    fitted <- fit_once(TRUE)
+    policy <- "deterministic_add_uniform_retry"
+  }
+
+  list(
+    fitted=fitted,
+    audit=data.frame(
+      contrast_id=contrast_id,
+      status=ifelse(policy == "standard", "PASS", "WARN_NUMERIC_RETRY"),
+      fit_policy=policy,
+      multifactor=isTRUE(multifactor),
+      one_way=one_way,
+      random_seed=seed,
+      add_uniform_used=policy != "standard",
+      primary_error=ifelse(is.null(primary_error), "", gsub("[\r\n\t]+", " ", primary_error)),
+      stringsAsFactors=FALSE
+    )
+  )
+}
+
 if ("--self-test" %in% args) {
   self_gene <- data.frame(
     gene_id=c("g1", "g2", "g3", "g4"),
@@ -124,7 +191,11 @@ if ("--self-test" %in% args) {
     self$audit$stageR_input_sites == 4,
     identical(self$audit$status, "WARN_UNTESTABLE_PVALUES")
   )
-  cat("DRIMSeq/stageR NA-policy self-test: PASS\n")
+  stopifnot(
+    identical(contrast_seed("CTCF_IAA_vs_CTCF_control"), contrast_seed("CTCF_IAA_vs_CTCF_control")),
+    contrast_seed("CTCF_IAA_vs_CTCF_control") != contrast_seed("RAD21_control_vs_CTCF_control")
+  )
+  cat("DRIMSeq/stageR NA-policy and deterministic-fit self-test: PASS\n")
   quit(save="no", status=0)
 }
 
@@ -174,7 +245,11 @@ for (i in seq_len(nrow(contrasts))) {
   if (qr(design)$rank < ncol(design)) stop(paste("Pair-specific design is not full rank:", con$contrast_id))
   condition_coef <- grep("^condition", colnames(design))
   if (length(condition_coef) != 1) stop(paste("Cannot identify one pairwise condition coefficient:", con$contrast_id))
-  d <- dmPrecision(d, design=design); d <- dmFit(d, design=design); d <- dmTest(d, coef=condition_coef)
+  multifactor <- length(setdiff(design_variables, "condition")) > 0
+  fit <- fit_drimseq_with_numeric_retry(
+    d, design, condition_coef, as.character(con$contrast_id), multifactor
+  )
+  d <- fit$fitted
   gene_result <- DRIMSeq::results(d, level="gene"); feature_result <- DRIMSeq::results(d, level="feature")
   gene_result$gene_padj <- p.adjust(gene_result$pvalue, method="BH")
   stagewise <- stagewise_with_na_policy(gene_result, feature_result, alpha)
@@ -211,15 +286,19 @@ for (i in seq_len(nrow(contrasts))) {
   target <- file.path(outdir, paste0(con$contrast_id, ".drimseq_stager.tsv"))
   gene_target <- file.path(outdir, paste0(con$contrast_id, ".gene_apa_summary.tsv"))
   na_audit_target <- file.path(outdir, paste0(con$contrast_id, ".na_audit.tsv"))
+  fit_audit_target <- file.path(outdir, paste0(con$contrast_id, ".fit_audit.tsv"))
   write.table(feature_result, target, sep="\t", quote=FALSE, row.names=FALSE)
   gene_screen_target <- file.path(outdir, paste0(con$contrast_id, ".gene_screen.tsv"))
   write.table(gene_result, gene_screen_target, sep="\t", quote=FALSE, row.names=FALSE)
   write.table(gene_summary, gene_target, sep="\t", quote=FALSE, row.names=FALSE)
   write.table(stagewise$audit, na_audit_target, sep="\t", quote=FALSE, row.names=FALSE)
+  write.table(fit$audit, fit_audit_target, sep="\t", quote=FALSE, row.names=FALSE)
   index[[length(index)+1]] <- data.frame(
     contrast_id=con$contrast_id, result_file=target, tested_sites=nrow(feature_result),
     gene_screen_file=gene_screen_target, gene_summary_file=gene_target,
     na_audit_file=na_audit_target,
+    fit_audit_file=fit_audit_target,
+    fit_policy=fit$audit$fit_policy,
     screening_na=stagewise$audit$screening_na,
     confirmation_na=stagewise$audit$confirmation_na,
     na_audit_status=stagewise$audit$status,

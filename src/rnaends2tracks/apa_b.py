@@ -20,6 +20,10 @@ REQUIRED_NA_AUDIT = {
     "stageR_input_sites", "stageR_adjusted_na", "stageR_adjusted_na_fraction",
     "na_policy",
 }
+REQUIRED_FIT_AUDIT = {
+    "contrast_id", "status", "fit_policy", "multifactor", "one_way",
+    "random_seed", "add_uniform_used", "primary_error",
+}
 
 
 def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
@@ -175,6 +179,39 @@ def _validate_na_audit(path: Path) -> None:
         raise RuntimeError(f"APA-B contrast NA audit reports an unsupported NA policy: {path}")
 
 
+def _validate_fit_audit(path: Path) -> None:
+    if not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError(f"APA-B contrast fit audit is unavailable: {path}")
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    if len(rows) != 1 or not REQUIRED_FIT_AUDIT.issubset(rows[0]):
+        raise RuntimeError(f"APA-B contrast fit audit has an invalid schema: {path}")
+    row = rows[0]
+    policy = row["fit_policy"]
+    expected_status = {
+        "standard": "PASS",
+        "deterministic_add_uniform_retry": "WARN_NUMERIC_RETRY",
+    }
+    if policy not in expected_status or row["status"] != expected_status[policy]:
+        raise RuntimeError(f"APA-B contrast fit audit has an invalid policy/status: {path}")
+    booleans = {"TRUE": True, "FALSE": False}
+    try:
+        multifactor = booleans[row["multifactor"]]
+        one_way = booleans[row["one_way"]]
+        add_uniform = booleans[row["add_uniform_used"]]
+        seed = int(row["random_seed"])
+    except (KeyError, ValueError) as exc:
+        raise RuntimeError(f"APA-B contrast fit audit has invalid typed values: {path}") from exc
+    if seed <= 0 or one_way == multifactor:
+        raise RuntimeError(f"APA-B contrast fit audit has inconsistent design metadata: {path}")
+    if policy == "standard" and (add_uniform or row["primary_error"]):
+        raise RuntimeError(f"APA-B standard fit audit unexpectedly records a retry: {path}")
+    if policy == "deterministic_add_uniform_retry" and (
+        not multifactor or not add_uniform or not row["primary_error"]
+    ):
+        raise RuntimeError(f"APA-B numerical-retry audit is incomplete: {path}")
+
+
 def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False, force: bool = False) -> None:
     settings = plan.project.get("apa_b", {})
     module_dir = results / "07_apa_b"
@@ -297,7 +334,7 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
             threads=1, memory_gb=plan.project["resources"]["apa_b"]["contrast_memory_gb"],
             output_suffixes=[
                 ".drimseq_stager.tsv", ".gene_screen.tsv", ".gene_apa_summary.tsv",
-                ".na_audit.tsv",
+                ".na_audit.tsv", ".fit_audit.tsv",
             ],
             signature_inputs=[counts, catalog], signature_parameters={
                 "genome": genome, "design": plan.project["design"],
@@ -318,9 +355,11 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         with index.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
                 _validate_na_audit(Path(row["na_audit_file"]))
+                _validate_fit_audit(Path(row["fit_audit_file"]))
                 outputs.extend([
                     Path(row["result_file"]), Path(row["gene_screen_file"]),
                     Path(row["gene_summary_file"]), Path(row["na_audit_file"]),
+                    Path(row["fit_audit_file"]),
                 ])
     if dry_run:
         event(log_dir, "apa_b", "dry_run", "Would run independent genome-specific APA-B and DRIMSeq/stageR")
