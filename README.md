@@ -133,12 +133,16 @@ Required columns include:
 - `STAR_PARALLEL_JOBS × STAR_THREADS` for alignments;
 - `SAMPLE_MERGE_PARALLEL_JOBS`;
 - `END_EXTRACTION_PARALLEL_JOBS`;
-- `DGE_CONTRAST_PARALLEL_JOBS` and `APA_CONTRAST_PARALLEL_JOBS`;
+- `DGE_CONTRAST_PARALLEL_JOBS`, `APA_A_CONTRAST_PARALLEL_JOBS`, and
+  `APA_B_CONTRAST_PARALLEL_JOBS` (the legacy shared APA setting remains a fallback);
+- `PARALLEL_DOWNSTREAM_MODULES` and `DOWNSTREAM_MODULE_PARALLEL_JOBS` to overlap
+  the DGE-then-final-tracks branch with independent APA-A and APA-B branches after active-PAS discovery;
+- `ENRICHMENT_PARALLEL_JOBS` for independent method/contrast enrichment jobs;
 - `TRACK_PARALLEL_JOBS × TRACK_THREADS`.
 
 The resolved maximum CPU/RAM for each pool is written before analysis. Outputs and timing fragments are deterministic even when jobs finish out of order.
 
-Alpha.10 distinguishes executor types in `00_metadata/resource_plan.tsv`: external tools remain in bounded thread-managed subprocess pools, while CPU-bound Python exact-end workers use separate processes so `END_EXTRACTION_PARALLEL_JOBS` corresponds to usable CPU concurrency.
+Alpha.10 distinguishes executor types in `00_metadata/resource_plan.tsv`: external tools remain in bounded thread-managed subprocess pools, while CPU-bound Python exact-end workers use separate processes so `END_EXTRACTION_PARALLEL_JOBS` corresponds to usable CPU concurrency. The plan also contains a `downstream/module_overlap` row. It validates the combined worst-case thread and memory peak before concurrent downstream branches can start. Final tracks begin as soon as DGE publishes the C4 size factors and therefore do not wait for APA-B; reducing `DOWNSTREAM_MODULE_PARALLEL_JOBS` to `1` restores sequential execution.
 
 Raw/CPM C0 track workers may overlap the sample-merge phase. The dispatcher first reserves the configured maximum merge CPU and RAM, then starts only the number of track workers that fit inside the remaining global ceilings. A zero-worker result is safe: track publication is deferred automatically to the dedicated `c0_tracks` stage. The current alpha.10 checkpoint does not overlap tracks with STAR itself.
 
@@ -176,7 +180,7 @@ results/
 
 `CLEANUP_INTERMEDIATES=true` is the default. Cleanup runs only after all enabled deliverable receipts and the report validate. It removes only an explicit allow-list (trimmed FASTQs, lane/all-alignment BAMs, temporary strand BAMs and bedGraphs), writes `provenance/cleanup/cleanup_manifest.tsv`, and preserves final BAMs, count universes, statistics, BigWigs, reports and provenance.
 
-`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; optional validated APA-B results; and APA-A/APA-B direction concordance. It embeds PCA, sample-distance, MA, volcano, and enrichment plots; lists validated samples and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC remains the detailed sequencing/alignment QC report. See [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
+`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; validated APA-B results; and APA-A/APA-B direction concordance and agreement percentage. Separate `differential_gene_expression_summary.tsv`, `alternative_polyadenylation_summary.tsv`, `top_differential_genes.tsv`, `top_apa_gene_events.tsv`, and `top_enrichment_terms.tsv` files make the major results directly sortable and reusable. The HTML embeds those top-result tables plus PCA, sample-distance, MA, volcano, and enrichment plots; lists validated samples and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC remains the detailed sequencing/alignment QC report. See [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
 
 Every report run also creates `10_reports/bigwig_collections.txt`, a one-column list grouped by track folder, and `10_reports/ucsc_track_descriptors/`, containing one descriptor file per collection plus `UCSC_bigWig_tracks.oneline.txt`. Each BigWig uses one valid UCSC custom-track line, collection-specific color, and optional `negateValues=on` for transcript-minus tracks. Set `UCSC_BIGDATA_URL_PREFIX` to the public directory containing a flat copy of the BigWigs; do not use Markdown link syntax in `config.conf`.
 
@@ -185,7 +189,7 @@ Every report run also creates `10_reports/bigwig_collections.txt`, a one-column 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.10.post6
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.10.post7
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).

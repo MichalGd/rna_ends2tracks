@@ -5,8 +5,9 @@ from pathlib import Path
 
 from rnaends2tracks.config import RunPlan
 from rnaends2tracks.report import (
-    _browser_assets, _contrast_summary, _exact_funnel_rows, _html_table,
-    _star_qc_rows, _track_collections,
+    _apa_b_gene_events, _browser_assets, _contrast_summary, _exact_funnel_rows,
+    _html_table, _star_qc_rows, _top_apa_events, _top_dge_events,
+    _top_enrichment_terms, _track_collections,
 )
 
 
@@ -19,6 +20,66 @@ def write_tsv(path, fields, rows):
 
 
 class ScientificReportTests(unittest.TestCase):
+    def test_top_event_summaries_cover_dge_and_both_apa_methods(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary)
+            dge = results / "05_gene_expression" / "GRCm39" / "C4_primary_deseq2"
+            dge_result = dge / "x.deseq2.tsv"
+            write_tsv(dge_result, ["gene_id", "baseMean", "log2FoldChange", "pvalue", "padj"], [
+                {"gene_id": "g1", "baseMean": "100", "log2FoldChange": "2", "pvalue": "0.001", "padj": "0.01"},
+            ])
+            write_tsv(dge / "result_index.tsv", ["contrast_id", "result_file"], [
+                {"contrast_id": "x", "result_file": str(dge_result)},
+            ])
+            for method_dir, method, site_field in (
+                ("06_apa_a_mcell2019", "APA-A", "significant_sites"),
+                ("07_apa_b", "APA-B", "confirmed_sites"),
+            ):
+                root = results / method_dir / "GRCm39"
+                summary = root / "stats" / "x.gene.tsv"
+                write_tsv(summary, ["gene_id", "gene_padj", "shift", "max_abs_delta_PAU", site_field], [
+                    {"gene_id": "g1", "gene_padj": "0.02", "shift": "distal",
+                     "max_abs_delta_PAU": "0.3", site_field: "1"},
+                ])
+                write_tsv(root / "stats" / "result_index.tsv", ["contrast_id", "gene_summary_file"], [
+                    {"contrast_id": "x", "gene_summary_file": str(summary)},
+                ])
+            self.assertEqual(_top_dge_events(results, 0.05)[0]["direction"], "up")
+            self.assertEqual(
+                {row["method"] for row in _top_apa_events(results, 0.05)},
+                {"APA-A", "APA-B"},
+            )
+
+    def test_validated_apa_b_events_use_the_drimseq_primary_index(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary)
+            root = results / "07_apa_b" / "GRCm39" / "drimseq"
+            summary = root / "x.gene_apa_summary.tsv"
+            write_tsv(summary, ["gene_id", "gene_padj", "shift", "confirmed_sites"], [
+                {"gene_id": "g1", "gene_padj": "0.01", "shift": "distal", "confirmed_sites": "2"},
+            ])
+            write_tsv(root / "result_index.tsv", ["contrast_id", "gene_summary_file"], [
+                {"contrast_id": "x", "gene_summary_file": str(summary)},
+            ])
+            self.assertEqual(_apa_b_gene_events(results, 0.05)[0]["gene_id"], "g1")
+
+    def test_top_enrichment_retains_ora_and_gsea_terms_independently(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ora = root / "ora.tsv"; gsea = root / "gsea.tsv"
+            fields = ["query", "database", "term_id", "term_name", "overlap_count", "NES", "padj"]
+            write_tsv(ora, fields, [
+                {"term_id": "ora1", "term_name": "ORA", "overlap_count": "5", "padj": "0.001"},
+            ])
+            write_tsv(gsea, fields, [
+                {"term_id": "gsea1", "term_name": "GSEA", "NES": "2.1", "padj": "0.002"},
+            ])
+            terms = _top_enrichment_terms([{
+                "analysis_type": "dge", "genome": "GRCm39", "contrast_id": "x",
+                "ora_file": str(ora), "gsea_file": str(gsea),
+            }], 0.05, limit_per_job=1)
+            self.assertEqual({row["method"] for row in terms}, {"ORA", "GSEA"})
+
     def test_contrast_summary_recounts_dge_apa_and_pcpa_sources(self):
         with tempfile.TemporaryDirectory() as temporary:
             results = Path(temporary)
@@ -47,6 +108,7 @@ class ScientificReportTests(unittest.TestCase):
             apa_dir = results / "06_apa_a_mcell2019" / "GRCm39" / "dexseq"
             apa_result = apa_dir / f"{contrast_id}.dexseq.tsv"
             shift_result = apa_dir / f"{contrast_id}.apa_shift.tsv"
+            gene_summary = apa_dir / f"{contrast_id}.gene_apa_summary.tsv"
             write_tsv(apa_result, ["pas_id", "padj"], [
                 {"pas_id": "p1", "padj": "0.01"},
                 {"pas_id": "p2", "padj": "0.2"},
@@ -56,11 +118,16 @@ class ScientificReportTests(unittest.TestCase):
                 {"gene_id": "g2", "shift": "proximal"},
                 {"gene_id": "g3", "shift": "no_shift"},
             ])
+            write_tsv(gene_summary, ["gene_id", "gene_padj"], [
+                {"gene_id": "g1", "gene_padj": "0.01"},
+                {"gene_id": "g2", "gene_padj": "0.2"},
+            ])
             write_tsv(
                 apa_dir / "result_index.tsv",
-                ["contrast_id", "result_file", "shift_file", "tested_sites", "significant_sites"],
+                ["contrast_id", "result_file", "shift_file", "gene_summary_file", "tested_sites", "significant_sites"],
                 [{"contrast_id": contrast_id, "result_file": str(apa_result),
-                  "shift_file": str(shift_result), "tested_sites": "2", "significant_sites": "1"}],
+                  "shift_file": str(shift_result), "gene_summary_file": str(gene_summary),
+                  "tested_sites": "2", "significant_sites": "1"}],
             )
             write_tsv(
                 results / "06_apa_a_mcell2019" / "GRCm39" / "candidate_pcpa.tsv",
@@ -71,6 +138,7 @@ class ScientificReportTests(unittest.TestCase):
             self.assertEqual(row["dge_tested_genes"], 3)
             self.assertEqual((row["dge_significant"], row["dge_up"], row["dge_down"]), (2, 1, 1))
             self.assertEqual((row["apa_a_tested_sites"], row["apa_a_significant_sites"]), (2, 1))
+            self.assertEqual((row["apa_a_tested_genes"], row["apa_a_significant_genes"]), (2, 1))
             self.assertEqual((row["apa_a_distal_genes"], row["apa_a_proximal_genes"]), (1, 1))
             self.assertEqual(row["apa_a_pcpa"], 1)
 

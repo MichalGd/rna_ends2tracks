@@ -15,11 +15,28 @@ from .receipts import receipt_valid, write_receipt
 
 CONTRAST_SUMMARY_FIELDS = [
     "genome", "contrast_id", "numerator", "denominator", "design_mode",
+    "paired", "n_pairs", "resolved_design",
     "dge_tested_genes", "dge_significant", "dge_up", "dge_down",
-    "apa_a_tested_sites", "apa_a_significant_sites", "apa_a_distal_genes",
+    "apa_a_tested_genes", "apa_a_significant_genes", "apa_a_tested_sites",
+    "apa_a_significant_sites", "apa_a_distal_genes",
     "apa_a_proximal_genes", "apa_a_pcpa", "apa_b_tested_sites",
-    "apa_b_confirmed_sites", "apa_b_pcpa", "apa_compared_sites",
-    "apa_direction_agree", "apa_direction_disagree",
+    "apa_b_tested_genes", "apa_b_significant_genes", "apa_b_confirmed_sites",
+    "apa_b_distal_genes", "apa_b_proximal_genes", "apa_b_pcpa", "apa_compared_sites",
+    "apa_direction_agree", "apa_direction_disagree", "apa_direction_agreement_pct",
+]
+
+DGE_EVENT_FIELDS = [
+    "genome", "contrast_id", "gene_id", "baseMean", "log2FoldChange",
+    "pvalue", "padj", "direction",
+]
+APA_EVENT_FIELDS = [
+    "method", "genome", "contrast_id", "gene_id", "gene_padj", "shift",
+    "max_abs_delta_PAU", "weighted_transcript_position_shift_nt",
+    "significant_or_confirmed_sites", "pcpa_candidate",
+]
+ENRICHMENT_TERM_FIELDS = [
+    "analysis_type", "genome", "contrast_id", "method", "query", "database",
+    "term_id", "term_name", "effect", "padj",
 ]
 
 TRACK_COLLECTION_ORDER = [
@@ -174,17 +191,26 @@ def _contrast_summary(
                 "numerator": contrast.get("numerator", ""),
                 "denominator": contrast.get("denominator", ""),
                 "design_mode": contrast.get("design_mode", ""),
+                "paired": contrast.get("paired", ""),
+                "n_pairs": contrast.get("n_pairs", ""),
+                "resolved_design": contrast.get("resolved_design", ""),
                 "dge_tested_genes": "",
                 "dge_significant": "",
                 "dge_up": "",
                 "dge_down": "",
                 "apa_a_tested_sites": "",
+                "apa_a_tested_genes": "",
+                "apa_a_significant_genes": "",
                 "apa_a_significant_sites": "",
                 "apa_a_distal_genes": "",
                 "apa_a_proximal_genes": "",
                 "apa_a_pcpa": "" if apa_a_pcpa is None else apa_a_pcpa[contrast_id],
                 "apa_b_tested_sites": "",
+                "apa_b_tested_genes": "",
+                "apa_b_significant_genes": "",
                 "apa_b_confirmed_sites": "",
+                "apa_b_distal_genes": "",
+                "apa_b_proximal_genes": "",
                 "apa_b_pcpa": "" if apa_b_pcpa is None else apa_b_pcpa[contrast_id],
                 "apa_compared_sites": "",
                 "apa_direction_agree": "",
@@ -212,6 +238,17 @@ def _contrast_summary(
                     "apa_a_distal_genes": shifts["distal"],
                     "apa_a_proximal_genes": shifts["proximal"],
                 })
+                gene_summary = Path(index.get("gene_summary_file", ""))
+                if gene_summary.is_file():
+                    genes = _required_rows(gene_summary, "APA-A gene summary")
+                    row.update({
+                        "apa_a_tested_genes": len(genes),
+                        "apa_a_significant_genes": sum(
+                            _number(item.get("gene_padj")) is not None
+                            and _number(item.get("gene_padj")) <= fdr
+                            for item in genes
+                        ),
+                    })
             if contrast_id in apa_b_index:
                 index = apa_b_index[contrast_id]
                 tested, confirmed = _tested_significant(
@@ -223,7 +260,27 @@ def _contrast_summary(
                     "apa_b_tested_sites": tested,
                     "apa_b_confirmed_sites": confirmed,
                 })
+                gene_summary = Path(index.get("gene_summary_file", ""))
+                if gene_summary.is_file():
+                    genes = _required_rows(gene_summary, "APA-B gene summary")
+                    significant_genes = [
+                        item for item in genes
+                        if _number(item.get("gene_padj")) is not None
+                        and _number(item.get("gene_padj")) <= fdr
+                    ]
+                    shifts = Counter(item.get("shift", "") for item in significant_genes)
+                    row.update({
+                        "apa_b_tested_genes": len(genes),
+                        "apa_b_significant_genes": len(significant_genes),
+                        "apa_b_distal_genes": shifts["distal"],
+                        "apa_b_proximal_genes": shifts["proximal"],
+                    })
             row.update(comparison.get(contrast_id, {}))
+            compared = int(row.get("apa_compared_sites") or 0)
+            agreed = int(row.get("apa_direction_agree") or 0)
+            row["apa_direction_agreement_pct"] = (
+                f"{100 * agreed / compared:.2f}" if compared else ""
+            )
             summary.append(row)
     return summary
 
@@ -231,7 +288,10 @@ def _contrast_summary(
 def _write_tsv(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
+        writer = csv.DictWriter(
+            handle, fieldnames=fields, delimiter="\t", lineterminator="\n",
+            extrasaction="ignore",
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -290,7 +350,7 @@ def _apa_b_interpretation(plan: RunPlan) -> tuple[str, list[dict[str, Any]]]:
 def _apa_b_gene_events(results: Path, fdr: float, limit: int = 100) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     root = results / "07_apa_b"
-    for index_path in sorted(root.rglob("result_index.tsv")) if root.is_dir() else []:
+    for index_path in sorted(root.glob("*/drimseq/result_index.tsv")) if root.is_dir() else []:
         genome = index_path.relative_to(root).parts[0]
         for index in _rows(index_path):
             summary = Path(index.get("gene_summary_file", ""))
@@ -310,6 +370,113 @@ def _apa_b_gene_events(results: Path, fdr: float, limit: int = 100) -> list[dict
                 })
     events.sort(key=lambda row: float(row["gene_padj"]))
     return events[:limit]
+
+
+def _top_dge_events(results: Path, fdr: float, limit_per_contrast: int = 25) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    root = results / "05_gene_expression"
+    # C4 active-PAS gene sums are the primary DGE result.  C5 featureCounts is
+    # diagnostic only and must not be mixed into the biological summary.
+    for index_path in sorted(root.glob("*/C4_primary_deseq2/result_index.tsv")) if root.is_dir() else []:
+        genome = index_path.relative_to(root).parts[0]
+        for index in _rows(index_path):
+            result = Path(index.get("result_file", ""))
+            if not result.is_file():
+                continue
+            selected = []
+            for row in _rows(result):
+                padj = _number(row.get("padj"))
+                effect = _number(row.get("log2FoldChange"))
+                if padj is None or padj > fdr or effect is None:
+                    continue
+                selected.append((padj, -abs(effect), row.get("gene_id", ""), row, effect))
+            for _padj, _rank, _gene, row, effect in sorted(selected, key=lambda item: item[:3])[:limit_per_contrast]:
+                events.append({
+                    "genome": genome, "contrast_id": index.get("contrast_id", ""),
+                    "gene_id": row.get("gene_id", ""), "baseMean": row.get("baseMean", ""),
+                    "log2FoldChange": row.get("log2FoldChange", ""),
+                    "pvalue": row.get("pvalue", ""), "padj": row.get("padj", ""),
+                    "direction": "up" if effect > 0 else "down",
+                })
+    return events
+
+
+def _top_apa_events(results: Path, fdr: float, limit_per_contrast: int = 25) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    definitions = (
+        ("APA-A", results / "06_apa_a_mcell2019", "significant_sites"),
+        ("APA-B", results / "07_apa_b", "confirmed_sites"),
+    )
+    for method, root, site_field in definitions:
+        if not root.is_dir():
+            continue
+        pcpa_by_genome: dict[str, set[tuple[str, str]]] = {}
+        for pcpa_path in root.glob("*/candidate_pcpa.tsv"):
+            genome = pcpa_path.parent.name
+            pcpa_by_genome[genome] = {
+                (row.get("contrast_id", ""), row.get("gene_id", "")) for row in _rows(pcpa_path)
+            }
+        for index_path in sorted(root.rglob("result_index.tsv")):
+            genome = index_path.relative_to(root).parts[0]
+            for index in _rows(index_path):
+                summary = Path(index.get("gene_summary_file", ""))
+                if not summary.is_file():
+                    continue
+                selected = []
+                for row in _rows(summary):
+                    padj = _number(row.get("gene_padj"))
+                    effect = _number(row.get("max_abs_delta_PAU")) or 0.0
+                    if padj is not None and padj <= fdr:
+                        selected.append((padj, -abs(effect), row.get("gene_id", ""), row))
+                for _padj, _effect, _gene, row in sorted(
+                    selected, key=lambda item: item[:3]
+                )[:limit_per_contrast]:
+                    contrast_id = index.get("contrast_id", "")
+                    gene_id = row.get("gene_id", "")
+                    events.append({
+                        "method": method, "genome": genome, "contrast_id": contrast_id,
+                        "gene_id": gene_id, "gene_padj": row.get("gene_padj", ""),
+                        "shift": row.get("shift", ""),
+                        "max_abs_delta_PAU": row.get("max_abs_delta_PAU", ""),
+                        "weighted_transcript_position_shift_nt": row.get(
+                            "weighted_transcript_position_shift_nt", ""),
+                        "significant_or_confirmed_sites": row.get(site_field, ""),
+                        "pcpa_candidate": str(
+                            (contrast_id, gene_id) in pcpa_by_genome.get(genome, set())
+                        ).lower(),
+                    })
+    return events
+
+
+def _top_enrichment_terms(
+    enrichment_rows: list[dict[str, str]], fdr: float, limit_per_job: int = 10,
+) -> list[dict[str, Any]]:
+    terms: list[dict[str, Any]] = []
+    for index in enrichment_rows:
+        for method, field in (("ORA", "ora_file"), ("GSEA", "gsea_file")):
+            selected: list[tuple[float, dict[str, Any]]] = []
+            source = Path(index.get(field, ""))
+            if not source.is_file():
+                continue
+            for row in _rows(source):
+                padj = _number(row.get("padj"))
+                if padj is None or padj > fdr:
+                    continue
+                effect = row.get("NES", "") if method == "GSEA" else row.get("overlap_count", "")
+                selected.append((padj, {
+                    "analysis_type": index.get("analysis_type", ""),
+                    "genome": index.get("genome", ""),
+                    "contrast_id": index.get("contrast_id", ""), "method": method,
+                    "query": row.get("query", ""), "database": row.get("database", ""),
+                    "term_id": row.get("term_id", ""), "term_name": row.get("term_name", ""),
+                    "effect": effect, "padj": row.get("padj", ""),
+                }))
+            # Keep both analyses visible: a large ORA result must not crowd all
+            # ranked GSEA terms (or vice versa) out of the final report.
+            terms.extend(
+                row for _padj, row in sorted(selected, key=lambda item: item[0])[:limit_per_job]
+            )
+    return terms
 
 
 def _track_collections(results: Path) -> tuple[list[Path], list[dict[str, Any]]]:
@@ -435,6 +602,11 @@ def _main_artifacts(results: Path, outdir: Path) -> list[dict[str, str]]:
         ("Combined one-line UCSC descriptors", outdir / "ucsc_track_descriptors" / "UCSC_bigWig_tracks.oneline.txt"),
         ("IGV session", outdir / "IGV_session.xml"),
         ("Full contrast summary", outdir / "contrast_summary.tsv"),
+        ("Differential gene-expression summary", outdir / "differential_gene_expression_summary.tsv"),
+        ("Top differential genes", outdir / "top_differential_genes.tsv"),
+        ("Alternative-polyadenylation summary", outdir / "alternative_polyadenylation_summary.tsv"),
+        ("Top APA gene events", outdir / "top_apa_gene_events.tsv"),
+        ("Top enrichment terms", outdir / "top_enrichment_terms.tsv"),
         ("Enrichment result index", outdir / "enrichment_summary" / "enrichment_index.tsv"),
         ("Provenance dashboard", outdir / "provenance_dashboard" / "dashboard.json"),
         ("Receipt inventory", outdir / "provenance_dashboard" / "receipt_inventory.tsv"),
@@ -554,7 +726,7 @@ def make_report(
     inputs.extend(result_indexes)
     for index_path in result_indexes:
         for row in _rows(index_path):
-            for field in ("result_file", "shift_file"):
+            for field in ("result_file", "shift_file", "gene_summary_file"):
                 if row.get(field):
                     inputs.append(Path(row[field]))
     inputs.extend(sorted((results / "06_apa_a_mcell2019").rglob("candidate_pcpa.tsv")))
@@ -565,7 +737,14 @@ def make_report(
     inputs.extend(sorted((results / "03_exact_ends").glob("*/*/end_audit.json")))
     inputs.extend(sorted((results / "04_active_pas").glob("*/count_universe_audit.json")))
     inputs.extend(sorted((results / "05_gene_expression").rglob("*.png")))
+    enrichment_index_path = results / "10_reports" / "enrichment_summary" / "enrichment_index.tsv"
     inputs.extend(sorted((results / "10_reports" / "enrichment_summary").rglob("*.tsv")))
+    for row in _rows(enrichment_index_path):
+        for field in (
+            "prepared_gene_table", "ora_file", "gsea_file", "mapping_audit", "provenance_file",
+        ):
+            if row.get(field):
+                inputs.append(Path(row[field]))
     inputs.append(results / "10_reports" / "enrichment_summary" / "run_receipt.json")
     validation_manifest = Path(str(plan.project.get("apa_b", {}).get("validation_manifest", "")))
     if validation_manifest.is_file():
@@ -616,15 +795,43 @@ def make_report(
     contrast_rows = _contrast_summary(plan, results, contrasts)
     contrast_summary = outdir / "contrast_summary.tsv"
     _write_tsv(contrast_summary, contrast_rows, CONTRAST_SUMMARY_FIELDS)
+    dge_summary = outdir / "differential_gene_expression_summary.tsv"
+    dge_fields = [
+        "genome", "contrast_id", "numerator", "denominator", "design_mode",
+        "paired", "n_pairs", "resolved_design",
+        "dge_tested_genes", "dge_significant", "dge_up", "dge_down",
+    ]
+    _write_tsv(dge_summary, contrast_rows, dge_fields)
+    apa_summary = outdir / "alternative_polyadenylation_summary.tsv"
+    apa_fields = [
+        field for field in CONTRAST_SUMMARY_FIELDS
+        if field in {
+            "genome", "contrast_id", "numerator", "denominator", "design_mode",
+            "paired", "n_pairs", "resolved_design",
+        }
+        or field.startswith("apa_")
+    ]
+    _write_tsv(apa_summary, contrast_rows, apa_fields)
     browser, track_rows = _browser_assets(plan, results, outdir)
-    provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
-    artifact_rows = _main_artifacts(results, outdir)
     samples = _rows(results / "00_metadata" / "validated_samples.tsv")
     star_rows = _star_qc_rows(results)
     orientation_rows = _rows(results / "02_alignment" / "protocol_orientation.tsv")
     funnel_rows = _exact_funnel_rows(results)
     active_pas_rows = _active_pas_rows(results)
     enrichment_rows = _rows(outdir / "enrichment_summary" / "enrichment_index.tsv")
+    report_fdr = float(plan.project.get("reporting", {}).get("fdr", 0.05))
+    enrichment_fdr = float(plan.project.get("enrichment", {}).get("padj", 0.05))
+    dge_events = _top_dge_events(results, report_fdr)
+    apa_events = _top_apa_events(results, report_fdr)
+    enrichment_terms = _top_enrichment_terms(enrichment_rows, enrichment_fdr)
+    dge_events_path = outdir / "top_differential_genes.tsv"
+    apa_events_path = outdir / "top_apa_gene_events.tsv"
+    enrichment_terms_path = outdir / "top_enrichment_terms.tsv"
+    _write_tsv(dge_events_path, dge_events, DGE_EVENT_FIELDS)
+    _write_tsv(apa_events_path, apa_events, APA_EVENT_FIELDS)
+    _write_tsv(enrichment_terms_path, enrichment_terms, ENRICHMENT_TERM_FIELDS)
+    provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
+    artifact_rows = _main_artifacts(results, outdir)
     apa_b_status, apa_b_rows = _apa_b_interpretation(plan)
     apa_b_gene_events = _apa_b_gene_events(
         results, float(plan.project.get("reporting", {}).get("fdr", 0.05)),
@@ -668,15 +875,22 @@ def make_report(
     )
     lines += [
         "", "## Differential and APA summary", "",
-        "| Contrast | DGE significant | DGE up | DGE down | APA-A significant sites | Distal genes | Proximal genes | PCPA |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| Contrast | DGE significant | DGE up | DGE down | APA-A significant genes | APA-A significant sites | APA-B significant genes | APA-B confirmed sites | PCPA A/B | Agreement % |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     lines.extend(
         f"| {row['contrast_id']} | {row['dge_significant']} | {row['dge_up']} | {row['dge_down']} | "
-        f"{row['apa_a_significant_sites']} | {row['apa_a_distal_genes']} | "
-        f"{row['apa_a_proximal_genes']} | {row['apa_a_pcpa']} |"
+        f"{row['apa_a_significant_genes']} | {row['apa_a_significant_sites']} | "
+        f"{row['apa_b_significant_genes']} | {row['apa_b_confirmed_sites']} | "
+        f"{row['apa_a_pcpa']}/{row['apa_b_pcpa']} | {row['apa_direction_agreement_pct']} |"
         for row in contrast_rows
     )
+    lines += [
+        "", "Detailed, sortable result summaries:", "",
+        "- `differential_gene_expression_summary.tsv` and `top_differential_genes.tsv`",
+        "- `alternative_polyadenylation_summary.tsv` and `top_apa_gene_events.tsv`",
+        "- `top_enrichment_terms.tsv`",
+    ]
     lines += ["", "## Gene-set enrichment", "",
               "| Analysis | Genome | Contrast | Foreground genes | Significant ORA | Significant GSEA |",
               "|---|---|---|---:|---:|---:|"]
@@ -776,9 +990,18 @@ def make_report(
                                      "C3_over_C2_pct", "ambiguous_pas", "pcpa_candidate_sites"])
         if active_pas_rows else "<p>Active-PAS audits were not available.</p>",
         "<h2 id='results'>Contrast-level results</h2>",
-        "<p>Blank cells mean that the corresponding optional analysis was disabled or unavailable.</p>",
+        "<p>Blank cells mean that the corresponding optional analysis was disabled or unavailable. "
+        "Counts are recalculated from the result tables and checked against each module index before the report is published.</p>",
         "<label>Filter contrasts: <input id='contrast-filter' type='search' placeholder='condition, genome, result...'></label>",
         _html_table(contrast_rows, CONTRAST_SUMMARY_FIELDS, "contrast-table"),
+        "<h3>Top differential genes</h3>",
+        "<p>Up to 25 FDR-significant genes per contrast, ordered by adjusted p-value and absolute fold change. "
+        "The complete DESeq2 tables remain linked in the output manifest.</p>",
+        _html_table(dge_events, DGE_EVENT_FIELDS) if dge_events else "<p>No DGE gene passed the configured FDR.</p>",
+        "<h3>Top APA gene-level events</h3>",
+        "<p>Up to 25 FDR-significant genes per method and contrast. APA-A and APA-B remain independent; "
+        "candidate PCPA marks intragenic premature cleavage/polyadenylation candidates, not proven termination.</p>",
+        _html_table(apa_events, APA_EVENT_FIELDS) if apa_events else "<p>No APA gene passed the configured FDR.</p>",
         "<h2 id='plots'>DGE exploratory and contrast plots</h2>",
         "<p>PCA and sample-distance plots use variance-stabilized C4 counts. MA and volcano plots are "
         "generated independently for every pairwise contrast.</p>",
@@ -791,6 +1014,9 @@ def make_report(
             "analysis_type", "genome", "contrast_id", "background_genes", "foreground_genes",
             "significant_ora_terms", "significant_gsea_terms", "status",
         ) if any(field in row for row in enrichment_rows)]) if enrichment_rows else "<p>Enrichment was disabled or unavailable.</p>",
+        "<h3>Top significant enrichment terms</h3>",
+        _html_table(enrichment_terms, ENRICHMENT_TERM_FIELDS)
+        if enrichment_terms else "<p>No enrichment term passed the configured adjusted-p threshold.</p>",
         _image_gallery(outdir, enrichment_images),
         "<h2 id='apa-b'>APA-B validation and interpretation</h2>",
         f"<p><strong>{html.escape(apa_b_status)}</strong></p>", _html_table(apa_b_rows, ["property", "value"]),
@@ -831,7 +1057,11 @@ def make_report(
         "document.querySelectorAll('#contrast-table tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(v));});}"
         "</script></body></html>\n", encoding="utf-8")
     provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
-    outputs = [markdown, html_target, summary, contrast_summary, *browser, *provenance_outputs]
+    outputs = [
+        markdown, html_target, summary, contrast_summary, dge_summary, apa_summary,
+        dge_events_path, apa_events_path, enrichment_terms_path,
+        *browser, *provenance_outputs,
+    ]
     write_receipt("report", outdir, signature, outputs, ["rna-ends2tracks", "report"])
     event(log_dir, "report", "completed", str(html_target))
     return html_target

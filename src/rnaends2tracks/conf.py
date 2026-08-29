@@ -21,7 +21,7 @@ DEFAULTS: dict[str, str] = {
     "APA_B_PILOT_ACCEPTED": "false",
     "APA_B_COMMAND_TEMPLATE": "auto",
     "APA_B_VALIDATION_MANIFEST": "",
-    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post4/installation_manifest.json",
+    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json",
     "APA_B_THREADS": "8",
     "APA_B_ENDPOINT_SOURCE": "auto",
     "APA_B_ENDPOINT_PARALLEL_JOBS": "8",
@@ -40,7 +40,7 @@ DEFAULTS: dict[str, str] = {
     "ENRICHMENT_APA_MIN_ABS_DELTA_PAU": "0.10",
     "ENRICHMENT_MIN_GENESET_SIZE": "10",
     "ENRICHMENT_MAX_GENESET_SIZE": "500",
-    "ENRICHMENT_PARALLEL_JOBS": "3",
+    "ENRICHMENT_PARALLEL_JOBS": "6",
     "RUN_TRACKS": "true",
     "GENERATE_EARLY_C0_TRACKS": "true",
     "LIBRARY_PROTOCOL": "quantseq_rev_v2_se",
@@ -72,6 +72,8 @@ DEFAULTS: dict[str, str] = {
     "MIN_ABS_DELTA_PAU": "0.10",
     "MAX_TOTAL_THREADS": "48",
     "MAX_TOTAL_MEMORY_GB": "384",
+    "PARALLEL_DOWNSTREAM_MODULES": "true",
+    "DOWNSTREAM_MODULE_PARALLEL_JOBS": "3",
     "PREPROCESS_PARALLEL_JOBS": "4",
     "FASTQC_THREADS": "4",
     "BBDUK_THREADS": "8",
@@ -82,11 +84,15 @@ DEFAULTS: dict[str, str] = {
     "SAMTOOLS_THREADS": "6",
     "SAMTOOLS_SORT_MEMORY_PER_THREAD_GB": "2",
     "SAMPLE_MERGE_PARALLEL_JOBS": "4",
-    "END_EXTRACTION_PARALLEL_JOBS": "6",
-    "TRACK_PARALLEL_JOBS": "4",
+    "END_EXTRACTION_PARALLEL_JOBS": "8",
+    "TRACK_PARALLEL_JOBS": "8",
     "TRACK_THREADS": "4",
-    "DGE_CONTRAST_PARALLEL_JOBS": "2",
-    "APA_CONTRAST_PARALLEL_JOBS": "2",
+    "DGE_CONTRAST_PARALLEL_JOBS": "3",
+    "APA_CONTRAST_PARALLEL_JOBS": "4",
+    # Empty values preserve the legacy shared APA_CONTRAST_PARALLEL_JOBS
+    # setting in existing project configurations.
+    "APA_A_CONTRAST_PARALLEL_JOBS": "",
+    "APA_B_CONTRAST_PARALLEL_JOBS": "",
     "GENERATE_ALL_READ_TRACKS": "true",
     "GENERATE_EXACT_END_TRACKS": "true",
     "GENERATE_FILTERED_END_TRACKS": "true",
@@ -177,6 +183,10 @@ def _int(values: dict[str, str], key: str, minimum: int = 1) -> int:
     if value < minimum:
         raise ConfError(f"{key} must be >= {minimum}")
     return value
+
+
+def _int_or(values: dict[str, str], key: str, fallback: str, minimum: int = 1) -> int:
+    return _int(values, key if values[key].strip() else fallback, minimum)
 
 
 def _float(values: dict[str, str], key: str, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -408,6 +418,12 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "resources": {
             "total_threads": _int(values, "MAX_TOTAL_THREADS"), "total_memory_gb": _int(values, "MAX_TOTAL_MEMORY_GB"),
             "temporary_directory": _path(values["TMP_DIR"], base),
+            "downstream": {
+                "parallel_modules": (
+                    _int(values, "DOWNSTREAM_MODULE_PARALLEL_JOBS")
+                    if _bool(values, "PARALLEL_DOWNSTREAM_MODULES") else 1
+                ),
+            },
             "preprocess": {
                 "trim_parallel_jobs": _int(values, "PREPROCESS_PARALLEL_JOBS"),
                 "star_parallel_jobs": _int(values, "STAR_PARALLEL_JOBS"),
@@ -421,13 +437,17 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "dge": {"featurecounts_threads": _int(values, "SAMTOOLS_THREADS"), "featurecounts_memory_gb": 16,
                     "contrast_parallel_jobs": _int(values, "DGE_CONTRAST_PARALLEL_JOBS"), "contrast_threads": 1, "contrast_memory_gb": 16},
             "apa_a": {"extraction_parallel_jobs": _int(values, "END_EXTRACTION_PARALLEL_JOBS"), "extraction_threads": 1,
-                      "extraction_memory_gb": 4, "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"),
+                      "extraction_memory_gb": 4,
+                      "contrast_parallel_jobs": _int_or(
+                          values, "APA_A_CONTRAST_PARALLEL_JOBS", "APA_CONTRAST_PARALLEL_JOBS"),
                       "contrast_threads": 1, "contrast_memory_gb": 16},
             "apa_b": {"engine_threads": _int(values, "APA_B_THREADS"), "engine_memory_gb": 24,
                       "endpoint_parallel_jobs": _int(values, "APA_B_ENDPOINT_PARALLEL_JOBS"),
                       "cluster_parallel_jobs": _int(values, "APA_B_CLUSTER_PARALLEL_JOBS"),
                       "deepip_threads": _int(values, "APA_B_DEEPIP_THREADS"), "sample_memory_gb": 4,
-                      "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"), "contrast_threads": 1,
+                      "contrast_parallel_jobs": _int_or(
+                          values, "APA_B_CONTRAST_PARALLEL_JOBS", "APA_CONTRAST_PARALLEL_JOBS"),
+                      "contrast_threads": 1,
                       "contrast_memory_gb": 16},
             "enrichment": {"parallel_jobs": _int(values, "ENRICHMENT_PARALLEL_JOBS"),
                            "threads": 1, "memory_gb": 16},

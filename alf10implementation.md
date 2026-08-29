@@ -20,6 +20,10 @@ The implementation includes:
 - synthetic and real-data pilot validation machinery;
 - post-hoc APA-A/APA-B proximity and effect-concordance comparison without merging their catalogs.
 
+## Post6 production-readiness follow-up
+
+The first complete 18-sample run exposed operational issues outside the APA-B scientific model. Release post7 adds budget-checked concurrent execution of the DGE-then-final-tracks, APA-A, and APA-B branches; separate APA-method contrast pools; correct enrichment/status accounting; safe cross-patch cleanup and repeat-cleanup evidence handling; exact legacy APA-A statistical regeneration before enrichment; and expanded DGE, APA, concordance, top-event, and enrichment summaries in the final report. Final tracks can therefore publish while APA-B is still running. These changes do not merge APA catalogs or alter either method's statistical universe.
+
 ## QuantSeq-specific scientific decision
 
 Unmodified PolyAseqTrap `FindPTA` prioritizes reads with primary poly(A)-tail evidence and stops when that evidence is absent. Lexogen QuantSeq REV libraries do not reliably retain a sequenced poly(A) tail, and the main workflow trims terminal poly(A/T) sequence before STAR alignment.

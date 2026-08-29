@@ -17,6 +17,9 @@ DEFAULT_RESOURCES: dict[str, Any] = {
     "total_threads": 8,
     "total_memory_gb": 32,
     "temporary_directory": "",
+    "downstream": {
+        "parallel_modules": 1,
+    },
     "preprocess": {
         "trim_parallel_jobs": 1,
         "star_parallel_jobs": 1,
@@ -115,7 +118,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     for key in ("total_threads", "total_memory_gb", "temporary_directory"):
         if key in supplied:
             resolved[key] = supplied[key]
-    for stage in ("preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
+    for stage in ("downstream", "preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
         stage_value = supplied.get(stage, {})
         if not isinstance(stage_value, dict):
             raise ValueError(f"resources.{stage} must be a YAML mapping")  # noqa: TRY004
@@ -127,9 +130,19 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     resolved["total_threads"] = _positive_int(resolved["total_threads"], "resources.total_threads")
     resolved["total_memory_gb"] = _positive_int(resolved["total_memory_gb"], "resources.total_memory_gb")
     resolved["temporary_directory"] = str(resolved.get("temporary_directory", "") or "")
-    for stage in ("preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
+    for stage in ("downstream", "preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
         for key, value in list(resolved[stage].items()):
             resolved[stage][key] = _positive_int(value, f"resources.{stage}.{key}")
+
+    modules = project.get("modules", {})
+    resolved["_enabled_downstream"] = [
+        name for name, enabled in (
+            ("gene_expression", modules.get("gene_expression", True)),
+            ("apa_a", modules.get("apa_a", True)),
+            ("apa_b", project.get("apa_b", {}).get("enabled", False)),
+            ("tracks", modules.get("tracks", True)),
+        ) if enabled
+    ]
 
     violations = [row for row in resource_plan_rows(resolved) if row["budget_status"] != "PASS"]
     if violations:
@@ -206,6 +219,69 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
             "total_memory_gb_ceiling": resources["total_memory_gb"],
             "budget_status": "PASS" if max_threads <= resources["total_threads"] and max_memory <= resources["total_memory_gb"] else "FAIL",
         })
+    enabled_downstream = set(resources.get(
+        "_enabled_downstream", ("gene_expression", "apa_a", "apa_b", "tracks"),
+    ))
+    dge_threads = max(
+        dge["featurecounts_threads"],
+        dge["contrast_parallel_jobs"] * dge["contrast_threads"],
+    )
+    dge_memory = max(
+        dge["featurecounts_memory_gb"],
+        dge["contrast_parallel_jobs"] * dge["contrast_memory_gb"],
+    )
+    track_threads = tracks["parallel_jobs"] * tracks["samtools_threads"]
+    track_memory = tracks["parallel_jobs"] * tracks["memory_gb"]
+    module_peaks: list[tuple[str, int, int]] = []
+    if "gene_expression" in enabled_downstream:
+        module_peaks.append((
+            "gene_expression_then_tracks",
+            max(dge_threads, track_threads if "tracks" in enabled_downstream else 0),
+            max(dge_memory, track_memory if "tracks" in enabled_downstream else 0),
+        ))
+    elif "tracks" in enabled_downstream:
+        module_peaks.append(("tracks", track_threads, track_memory))
+    module_peaks.extend(item for item in [
+        (
+            "apa_a",
+            apa_a["contrast_parallel_jobs"] * apa_a["contrast_threads"],
+            apa_a["contrast_parallel_jobs"] * apa_a["contrast_memory_gb"],
+        ),
+        (
+            "apa_b",
+            max(
+                apa_b["endpoint_parallel_jobs"], apa_b["cluster_parallel_jobs"],
+                apa_b["deepip_threads"], apa_b["contrast_parallel_jobs"] * apa_b["contrast_threads"],
+            ),
+            max(
+                apa_b["endpoint_parallel_jobs"] * apa_b["sample_memory_gb"],
+                apa_b["cluster_parallel_jobs"] * apa_b["sample_memory_gb"],
+                apa_b["engine_memory_gb"],
+                apa_b["contrast_parallel_jobs"] * apa_b["contrast_memory_gb"],
+            ),
+        ),
+    ] if item[0] in enabled_downstream)
+    parallel_modules = min(resources["downstream"]["parallel_modules"], len(module_peaks))
+    max_threads = sum(sorted((item[1] for item in module_peaks), reverse=True)[:parallel_modules])
+    max_memory = sum(sorted((item[2] for item in module_peaks), reverse=True)[:parallel_modules])
+    rows.append({
+        "stage": "downstream",
+        "work_unit": "module_overlap",
+        "executor": "thread_coordinator_with_nested_bounded_pools",
+        "units": len(module_peaks),
+        "max_parallel_jobs": resources["downstream"]["parallel_modules"],
+        "effective_parallel_jobs": parallel_modules,
+        "threads_per_job": "variable",
+        "memory_gb_per_job": "variable",
+        "max_threads": max_threads,
+        "max_memory_gb": max_memory,
+        "total_threads_ceiling": resources["total_threads"],
+        "total_memory_gb_ceiling": resources["total_memory_gb"],
+        "budget_status": (
+            "PASS" if max_threads <= resources["total_threads"]
+            and max_memory <= resources["total_memory_gb"] else "FAIL"
+        ),
+    })
     return rows
 
 

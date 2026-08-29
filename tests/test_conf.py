@@ -84,6 +84,20 @@ class ConfTests(unittest.TestCase):
             self.assertEqual(project["apa_b"]["endpoint_source"], "exact_ends")
             self.assertEqual(project["resources"]["apa_b"]["cluster_parallel_jobs"], 8)
 
+    def test_downstream_and_method_specific_parallel_controls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); config = root / "config.conf"
+            base = "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+            config.write_text(
+                base + "PARALLEL_DOWNSTREAM_MODULES=true\nDOWNSTREAM_MODULE_PARALLEL_JOBS=2\n"
+                "APA_CONTRAST_PARALLEL_JOBS=4\nAPA_A_CONTRAST_PARALLEL_JOBS=3\n",
+                encoding="utf-8",
+            )
+            project, _ = project_from_conf(config)
+            self.assertEqual(project["resources"]["downstream"]["parallel_modules"], 2)
+            self.assertEqual(project["resources"]["apa_a"]["contrast_parallel_jobs"], 3)
+            self.assertEqual(project["resources"]["apa_b"]["contrast_parallel_jobs"], 4)
+
     def test_mixed_genomes_create_only_within_genome_contrasts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

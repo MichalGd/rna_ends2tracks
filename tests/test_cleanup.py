@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+import csv
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,7 +36,8 @@ def _write_success_receipts(results: Path, workflow_version: str = __version__) 
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"complete")
         (module_dir / "run_receipt.json").write_text(json.dumps({
-            "workflow_version": workflow_version, "exit_status": 0,
+            "schema_version": 1, "module": module, "workflow_version": workflow_version,
+            "exit_status": 0,
             "outputs": [{
                 "path": str(output.resolve()), "size": output.stat().st_size,
                 "sha256": sha256(output),
@@ -92,6 +94,74 @@ class CleanupTests(unittest.TestCase):
             with patch("rnaends2tracks.receipts.__version__", "0.1.0a9.post2"):
                 clean_intermediates(_plan(), results)
             self.assertFalse(trimmed.exists())
+
+    def test_cleanup_accepts_successful_receipts_across_patch_releases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "project" / "results"
+            trimmed = results / "01_qc" / "trimmed_fastq" / "S1.trimmed.fastq.gz"
+            trimmed.parent.mkdir(parents=True, exist_ok=True); trimmed.write_bytes(b"test")
+            _write_success_receipts(results, workflow_version="0.1.0a9.post2")
+            clean_intermediates(_plan(), results)
+            self.assertFalse(trimmed.exists())
+
+    def test_cleanup_rejects_receipts_outside_the_audited_release_lineage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "project" / "results"
+            trimmed = results / "01_qc" / "trimmed_fastq" / "S1.trimmed.fastq.gz"
+            trimmed.parent.mkdir(parents=True, exist_ok=True); trimmed.write_bytes(b"test")
+            _write_success_receipts(results, workflow_version="9.9.9")
+            with self.assertRaisesRegex(RuntimeError, "02_alignment"):
+                clean_intermediates(_plan(), results)
+            self.assertTrue(trimmed.is_file())
+
+    def test_resume_accepts_output_proven_removed_by_receipted_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "project" / "results"
+            trimmed = results / "01_qc" / "trimmed_fastq" / "S1.trimmed.fastq.gz"
+            trimmed.parent.mkdir(parents=True, exist_ok=True); trimmed.write_bytes(b"test")
+            _write_success_receipts(results, workflow_version="0.1.0a9")
+            removed = results / "02_alignment" / "final.output"
+            removed.unlink()
+            cleanup_dir = results / "provenance" / "cleanup"
+            cleanup_dir.mkdir(parents=True)
+            manifest = cleanup_dir / "cleanup_manifest.tsv"
+            with manifest.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(
+                    handle, fieldnames=["category", "path", "size_bytes", "status", "removed_at"],
+                    delimiter="\t", lineterminator="\n",
+                )
+                writer.writeheader(); writer.writerow({
+                    "category": "test", "path": str(removed.resolve(strict=False)),
+                    "size_bytes": 8, "status": "removed", "removed_at": "now",
+                })
+            (cleanup_dir / "run_receipt.json").write_text(json.dumps({
+                "schema_version": 1, "module": "cleanup", "exit_status": 0,
+                "outputs": [{
+                    "path": str(manifest.resolve()), "size": manifest.stat().st_size,
+                    "validation": "sha256", "sha256": sha256(manifest),
+                }],
+            }), encoding="utf-8")
+            clean_intermediates(_plan(), results)
+            self.assertFalse(trimmed.exists())
+
+    def test_unreceipted_cleanup_manifest_cannot_excuse_missing_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "project" / "results"
+            trimmed = results / "01_qc" / "trimmed_fastq" / "S1.trimmed.fastq.gz"
+            trimmed.parent.mkdir(parents=True, exist_ok=True); trimmed.write_bytes(b"test")
+            _write_success_receipts(results)
+            removed = results / "02_alignment" / "final.output"
+            removed.unlink()
+            manifest = results / "provenance" / "cleanup" / "cleanup_manifest.tsv"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(
+                "category\tpath\tsize_bytes\tstatus\tremoved_at\n"
+                f"test\t{removed.resolve(strict=False)}\t8\tremoved\tnow\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "02_alignment"):
+                clean_intermediates(_plan(), results)
+            self.assertTrue(trimmed.is_file())
 
     def test_repeated_cleanup_preserves_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:

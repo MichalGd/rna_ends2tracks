@@ -21,6 +21,17 @@ The first laptop-only development slice is in progress and does not alter the ac
 
 The Python 3.10/3.11, shell/R parsing, repository-contract, and complete Linux Conda-environment checks pass on the feature branch. These remain unreleased development changes. No stable launcher, installed environment, PAS atlas, active project configuration, or current output directory is modified by this work.
 
+### Production-readiness checkpoint: 2026-08-29
+
+The first complete 18-sample mouse run validated gene expression, APA-A, pilot-accepted APA-B, method comparison, 45 enrichment analyses, 504 BigWigs, reporting, and cleanup. Follow-up implementation addresses the resume-only issues exposed by that run:
+
+- the DGE-then-final-tracks, APA-A, and APA-B branches can overlap after active-PAS discovery; their combined worst-case resource peak is validated before execution, and final tracks no longer wait for APA-B;
+- APA-A and APA-B contrast pools have separate configuration controls while retaining the legacy shared fallback;
+- status reconciles old stages with successful receipts and counts enrichment jobs from the authoritative index;
+- cleanup accepts successful cross-patch receipts and files proven removed by an earlier receipt-validated cleanup, while continuing to reject tampering or missing evidence;
+- pre-alpha.10 APA-A indexes are upgraded by exact statistical regeneration before enrichment rather than by approximating gene-level q-values;
+- the final report publishes separate DGE and APA overview tables plus top differential genes, top APA gene events, and top enrichment terms, and embeds these in the scientific HTML report.
+
 ## 1. Executive decision
 
 Alpha.10 should be a focused performance, observability, APA-B activation, biological-interpretation, reporting, and usability release. It should preserve the validated alpha.9 scientific contracts while making the workflow substantially faster and easier to operate.

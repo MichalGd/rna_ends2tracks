@@ -23,7 +23,7 @@ Re-run the same command. Matching module, sample and contrast receipts skip comp
 
 ## Resource failure
 
-Preflight fails if any pool’s parallel jobs multiplied by per-job CPU/RAM exceeds `MAX_TOTAL_THREADS` or `MAX_TOTAL_MEMORY_GB`. Reduce parallel jobs first; reduce per-tool threads only when appropriate. Check `00_metadata/resource_plan.tsv` and `.checkpoints/timings/`.
+Preflight fails if any pool’s parallel jobs multiplied by per-job CPU/RAM exceeds `MAX_TOTAL_THREADS` or `MAX_TOTAL_MEMORY_GB`. It also checks the aggregate `downstream/module_overlap` peak when the DGE-then-final-tracks branch, APA-A, and APA-B are configured to overlap. Reduce method-specific parallel jobs first, reduce `DOWNSTREAM_MODULE_PARALLEL_JOBS`, or set `PARALLEL_DOWNSTREAM_MODULES=false`; reduce per-tool threads only when appropriate. Check `00_metadata/resource_plan.tsv` and `.checkpoints/timings/`.
 
 ## Orientation failure
 
@@ -35,7 +35,9 @@ STAR indices are not intrinsically tied to exact read length. A 150-overhang ind
 
 ## Cleanup
 
-Cleanup requires successful receipts for all enabled final modules and the report. If interrupted before cleanup, resume through `cleanup`. `provenance/cleanup/cleanup_manifest.tsv` is cumulative. Final outputs are not cleanup targets. Retained intermediates can be controlled in `config.conf` for diagnostic runs.
+Cleanup requires successful schema-v1 receipts for all enabled final modules and the report. A safe patch-release resume may use successful receipts created by an earlier patch version; cleanup validates their recorded outputs rather than rejecting them solely on version text. If a recorded intermediate was removed by an earlier successful cleanup, the missing file is accepted only when it is listed in the cumulative cleanup manifest and that manifest is itself covered by a successful receipt. Altered, missing, or unaudited files still block cleanup. If interrupted before cleanup, resume through `cleanup`. Final outputs are not cleanup targets. Retained intermediates can be controlled in `config.conf` for diagnostic runs.
+
+When enrichment is resumed from a pre-alpha.10 APA-A result index, the workflow automatically regenerates only the APA-A statistical layer to obtain exact gene-level q-values and summaries. It does not approximate gene-level significance from site-level adjusted p-values and does not repeat alignment, exact-end extraction, or active-PAS discovery.
 
 ## Failed environment installation
 

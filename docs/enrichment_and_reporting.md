@@ -42,7 +42,7 @@ ENRICHMENT_DGE_MIN_ABS_LFC=1.0
 ENRICHMENT_APA_MIN_ABS_DELTA_PAU=0.10
 ENRICHMENT_MIN_GENESET_SIZE=10
 ENRICHMENT_MAX_GENESET_SIZE=500
-ENRICHMENT_PARALLEL_JOBS=3
+ENRICHMENT_PARALLEL_JOBS=6
 ```
 
 `FDR` controls selection of DGE/APA effects. `ENRICHMENT_PADJ` controls pathway significance. These thresholds answer different questions and are recorded separately.
@@ -50,6 +50,16 @@ ENRICHMENT_PARALLEL_JOBS=3
 ## Outputs
 
 Every enrichment job contains `prepared_gene_table.tsv`, `ora.tsv`, `gsea.tsv`, `mapping_audit.tsv`, `enrichment.pdf`, `enrichment.png`, `provenance.tsv`, and a receipt. The global machine-readable index is `10_reports/enrichment_summary/enrichment_index.tsv`.
+
+The scientific report publishes both overview and drill-down tables:
+
+- `differential_gene_expression_summary.tsv`: tested, significant, up- and downregulated genes per contrast;
+- `top_differential_genes.tsv`: up to 25 FDR-significant genes per contrast with effect sizes and adjusted p-values;
+- `alternative_polyadenylation_summary.tsv`: APA-A, APA-B, PCPA and method-concordance counts per contrast;
+- `top_apa_gene_events.tsv`: significant gene-level events from each independent APA method, including shift direction and PCPA status;
+- `top_enrichment_terms.tsv`: the strongest significant ORA and GSEA terms for every method/contrast job.
+
+These are summaries, not replacements for the complete contrast tables referenced by each module's `result_index.tsv`. The HTML report embeds the same summaries and explains thresholds and interpretation limits.
 
 The final report also creates `10_reports/provenance_dashboard/`:
 
