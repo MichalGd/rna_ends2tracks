@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .config import RunPlan, signature_for, workflow_requirements
 from .external import event
-from .receipts import receipt_valid, sha256, workflow_version_compatible, write_receipt
+from .receipts import receipt_valid, sha256, write_receipt
+
+
+SUPPORTED_CLEANUP_EVIDENCE = re.compile(r"^0[.]1[.]0a(?:9|10)(?:[.]post[0-9]+)?$")
 
 
 def _safe_results_root(results: Path) -> Path:
@@ -20,13 +24,69 @@ def _safe_results_root(results: Path) -> Path:
     return root
 
 
-def _successful_receipt(module_dir: Path) -> bool:
+def _prior_cleanup_removed_paths(root: Path) -> set[Path]:
+    """Return paths proven removed by a previously successful cleanup.
+
+    A resumed run may validate an upstream receipt after its dispensable outputs
+    were already removed by an earlier successful cleanup.  Trust only the
+    cumulative manifest covered by a successful cleanup receipt; an arbitrary
+    manifest is not sufficient evidence.
+    """
+    cleanup_dir = root / "provenance" / "cleanup"
+    receipt_path = cleanup_dir / "run_receipt.json"
+    manifest = cleanup_dir / "cleanup_manifest.tsv"
+    try:
+        receipt: dict[str, Any] = json.loads(receipt_path.read_text(encoding="utf-8"))
+        output = next(
+            item for item in receipt.get("outputs", [])
+            if Path(str(item.get("path", ""))).resolve() == manifest.resolve()
+        )
+        stat = manifest.stat()
+        if (
+            receipt.get("exit_status") != 0 or receipt.get("schema_version") != 1
+            or receipt.get("module") != "cleanup"
+        ):
+            return set()
+        if stat.st_size != int(output["size"]):
+            return set()
+        if output.get("validation") == "size_mtime":
+            if stat.st_mtime_ns != int(output["mtime_ns"]):
+                return set()
+        elif sha256(manifest) != str(output["sha256"]):
+            return set()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, StopIteration):
+        return set()
+
+    removed: set[Path] = set()
+    try:
+        with manifest.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle, delimiter="\t"):
+                if row.get("status") != "removed":
+                    continue
+                path = Path(row.get("path", "")).resolve(strict=False)
+                if path.is_relative_to(root):
+                    removed.add(path)
+    except (OSError, ValueError):
+        return set()
+    return removed
+
+
+def _successful_receipt(module_dir: Path, removed_paths: set[Path]) -> bool:
     receipt_path = module_dir / "run_receipt.json"
     try:
         receipt: dict[str, Any] = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    if not workflow_version_compatible(receipt.get("workflow_version")) or receipt.get("exit_status") != 0:
+    # Cleanup does not reuse a computation.  Its guard only needs auditable
+    # evidence that the stage completed successfully.  Requiring an exact
+    # patch-version match made safe cross-version resumes impossible.
+    if (
+        receipt.get("schema_version") != 1 or receipt.get("exit_status") != 0
+        or not SUPPORTED_CLEANUP_EVIDENCE.fullmatch(
+            str(receipt.get("workflow_version", "")).strip()
+        )
+        or not str(receipt.get("module", "")).strip()
+    ):
         return False
     outputs = receipt.get("outputs")
     if not isinstance(outputs, list) or not outputs:
@@ -35,6 +95,8 @@ def _successful_receipt(module_dir: Path) -> bool:
         path = Path(str(output.get("path", "")))
         try:
             if not path.is_file():
+                if path.resolve(strict=False) in removed_paths:
+                    continue
                 return False
             stat = path.stat()
             if stat.st_size != int(output["size"]):
@@ -44,15 +106,18 @@ def _successful_receipt(module_dir: Path) -> bool:
                     return False
             elif sha256(path) != str(output["sha256"]):
                 return False
-        except (OSError, KeyError, TypeError, ValueError):
+        except (OSError, KeyError, TypeError, ValueError, AttributeError):
             return False
     return True
 
 
 def _require_successful_workflow(plan: RunPlan, root: Path) -> None:
+    removed_paths = _prior_cleanup_removed_paths(root)
     required = ["02_alignment", "10_reports"]
     modules = plan.project.get("modules", {})
     requirements = workflow_requirements(plan.project)
+    if modules.get("rseqc", False):
+        required.append("01_qc/rseqc")
     if requirements["exact_ends"]:
         required.append("03_exact_ends")
     if requirements["active_pas"]:
@@ -67,7 +132,10 @@ def _require_successful_workflow(plan: RunPlan, root: Path) -> None:
         required.append("08_apa_comparison")
     if modules.get("tracks", True):
         required.append("09_tracks")
-    incomplete = [name for name in required if not _successful_receipt(root / name)]
+    incomplete = [
+        name for name in required
+        if not _successful_receipt(root / name, removed_paths)
+    ]
     enrichment_enabled = bool(
         (modules.get("dge_enrichment", False) and modules.get("gene_expression", True))
         or (modules.get("apa_enrichment", False) and (
@@ -75,7 +143,7 @@ def _require_successful_workflow(plan: RunPlan, root: Path) -> None:
         ))
     )
     if enrichment_enabled and not _successful_receipt(
-        root / "10_reports" / "enrichment_summary"
+        root / "10_reports" / "enrichment_summary", removed_paths
     ):
         incomplete.append("10_reports/enrichment_summary")
     if incomplete:

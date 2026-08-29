@@ -21,7 +21,7 @@ DEFAULTS: dict[str, str] = {
     "APA_B_PILOT_ACCEPTED": "false",
     "APA_B_COMMAND_TEMPLATE": "auto",
     "APA_B_VALIDATION_MANIFEST": "",
-    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post4/installation_manifest.json",
+    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json",
     "APA_B_THREADS": "8",
     "APA_B_ENDPOINT_SOURCE": "auto",
     "APA_B_ENDPOINT_PARALLEL_JOBS": "8",
@@ -40,9 +40,18 @@ DEFAULTS: dict[str, str] = {
     "ENRICHMENT_APA_MIN_ABS_DELTA_PAU": "0.10",
     "ENRICHMENT_MIN_GENESET_SIZE": "10",
     "ENRICHMENT_MAX_GENESET_SIZE": "500",
-    "ENRICHMENT_PARALLEL_JOBS": "3",
+    "ENRICHMENT_PARALLEL_JOBS": "6",
     "RUN_TRACKS": "true",
     "GENERATE_EARLY_C0_TRACKS": "true",
+    "RUN_RSEQC": "true",
+    "RSEQC_INFER_EXPERIMENT": "true",
+    "RSEQC_READ_DISTRIBUTION": "true",
+    "RSEQC_GENE_BODY_COVERAGE": "true",
+    "RSEQC_MULTIQC": "true",
+    "RSEQC_SAMPLE_READS": "200000",
+    "RSEQC_MIN_TRANSCRIPT_LENGTH": "100",
+    "RSEQC_PARALLEL_JOBS": "6",
+    "RSEQC_MEMORY_GB": "4",
     "LIBRARY_PROTOCOL": "quantseq_rev_v2_se",
     "LIBRARY_LAYOUT": "single_end",
     "UMI_PRESENT": "false",
@@ -72,6 +81,8 @@ DEFAULTS: dict[str, str] = {
     "MIN_ABS_DELTA_PAU": "0.10",
     "MAX_TOTAL_THREADS": "48",
     "MAX_TOTAL_MEMORY_GB": "384",
+    "PARALLEL_DOWNSTREAM_MODULES": "true",
+    "DOWNSTREAM_MODULE_PARALLEL_JOBS": "3",
     "PREPROCESS_PARALLEL_JOBS": "4",
     "FASTQC_THREADS": "4",
     "BBDUK_THREADS": "8",
@@ -82,11 +93,15 @@ DEFAULTS: dict[str, str] = {
     "SAMTOOLS_THREADS": "6",
     "SAMTOOLS_SORT_MEMORY_PER_THREAD_GB": "2",
     "SAMPLE_MERGE_PARALLEL_JOBS": "4",
-    "END_EXTRACTION_PARALLEL_JOBS": "6",
-    "TRACK_PARALLEL_JOBS": "4",
+    "END_EXTRACTION_PARALLEL_JOBS": "8",
+    "TRACK_PARALLEL_JOBS": "8",
     "TRACK_THREADS": "4",
-    "DGE_CONTRAST_PARALLEL_JOBS": "2",
-    "APA_CONTRAST_PARALLEL_JOBS": "2",
+    "DGE_CONTRAST_PARALLEL_JOBS": "3",
+    "APA_CONTRAST_PARALLEL_JOBS": "4",
+    # Empty values preserve the legacy shared APA_CONTRAST_PARALLEL_JOBS
+    # setting in existing project configurations.
+    "APA_A_CONTRAST_PARALLEL_JOBS": "",
+    "APA_B_CONTRAST_PARALLEL_JOBS": "",
     "GENERATE_ALL_READ_TRACKS": "true",
     "GENERATE_EXACT_END_TRACKS": "true",
     "GENERATE_FILTERED_END_TRACKS": "true",
@@ -113,7 +128,9 @@ DEFAULTS: dict[str, str] = {
 REQUIRED = {"PROJECT_ID", "SAMPLESHEET", "OUTPUT_DIR"}
 REFERENCE_KEYS = {
     "HG38_STAR_INDEX", "HG38_FASTA", "HG38_GTF", "HG38_CHROM_SIZES", "HG38_PAS_ATLAS",
+    "HG38_RSEQC_BED",
     "MM39_STAR_INDEX", "MM39_FASTA", "MM39_GTF", "MM39_CHROM_SIZES", "MM39_PAS_ATLAS",
+    "MM39_RSEQC_BED",
 }
 ALLOWED = set(DEFAULTS) | REQUIRED | REFERENCE_KEYS
 
@@ -177,6 +194,10 @@ def _int(values: dict[str, str], key: str, minimum: int = 1) -> int:
     if value < minimum:
         raise ConfError(f"{key} must be >= {minimum}")
     return value
+
+
+def _int_or(values: dict[str, str], key: str, fallback: str, minimum: int = 1) -> int:
+    return _int(values, key if values[key].strip() else fallback, minimum)
 
 
 def _float(values: dict[str, str], key: str, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -253,6 +274,12 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         raise ConfError("ENRICHMENT_KEGG=true is not implemented in alpha.10; use GO, Reactome, or Hallmark")
     if not (_bool(values, "ENRICHMENT_ORA") or _bool(values, "ENRICHMENT_GSEA")):
         raise ConfError("At least one of ENRICHMENT_ORA or ENRICHMENT_GSEA must be true")
+    if _bool(values, "RUN_RSEQC") and not any(_bool(values, key) for key in (
+        "RSEQC_INFER_EXPERIMENT", "RSEQC_READ_DISTRIBUTION", "RSEQC_GENE_BODY_COVERAGE",
+    )):
+        raise ConfError("RUN_RSEQC=true requires at least one enabled RSeQC analysis")
+    if _int(values, "RSEQC_MIN_TRANSCRIPT_LENGTH") < 100:
+        raise ConfError("RSEQC_MIN_TRANSCRIPT_LENGTH must be at least 100")
     minimum_geneset = _int(values, "ENRICHMENT_MIN_GENESET_SIZE")
     maximum_geneset = _int(values, "ENRICHMENT_MAX_GENESET_SIZE")
     if minimum_geneset > maximum_geneset:
@@ -297,6 +324,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "gtf": _path(values.get("HG38_GTF", ""), base),
             "chrom_sizes": _path(values.get("HG38_CHROM_SIZES", ""), base),
             "pas_atlas": _path(values.get("HG38_PAS_ATLAS", ""), base),
+            "rseqc_bed": _path(values.get("HG38_RSEQC_BED", ""), base),
         },
         "GRCm39": {
             "species": "mouse", "assembly": "GRCm39", "release": "GENCODE_vM31",
@@ -305,6 +333,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "gtf": _path(values.get("MM39_GTF", ""), base),
             "chrom_sizes": _path(values.get("MM39_CHROM_SIZES", ""), base),
             "pas_atlas": _path(values.get("MM39_PAS_ATLAS", ""), base),
+            "rseqc_bed": _path(values.get("MM39_RSEQC_BED", ""), base),
         },
     }
     project: dict[str, Any] = {
@@ -334,6 +363,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "gene_expression": _bool(values, "RUN_GENE_EXPRESSION"),
             "apa_a": _bool(values, "RUN_APA_A_MCELL2019"),
             "apa_b": _bool(values, "RUN_APA_B"), "tracks": _bool(values, "RUN_TRACKS"),
+            "rseqc": _bool(values, "RUN_RSEQC"),
             "dge_enrichment": _bool(values, "RUN_DGE_ENRICHMENT"),
             "apa_enrichment": _bool(values, "RUN_APA_ENRICHMENT"),
         },
@@ -368,6 +398,15 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "endpoint_source": values["APA_B_ENDPOINT_SOURCE"].lower(),
         },
         "reporting": {"fdr": _float(values, "FDR"), "min_abs_delta_pau": _float(values, "MIN_ABS_DELTA_PAU")},
+        "rseqc": {
+            "enabled": _bool(values, "RUN_RSEQC"),
+            "infer_experiment": _bool(values, "RSEQC_INFER_EXPERIMENT"),
+            "read_distribution": _bool(values, "RSEQC_READ_DISTRIBUTION"),
+            "gene_body_coverage": _bool(values, "RSEQC_GENE_BODY_COVERAGE"),
+            "multiqc": _bool(values, "RSEQC_MULTIQC"),
+            "sample_reads": _int(values, "RSEQC_SAMPLE_READS"),
+            "minimum_transcript_length": _int(values, "RSEQC_MIN_TRANSCRIPT_LENGTH"),
+        },
         "enrichment": {
             "ora": _bool(values, "ENRICHMENT_ORA"), "gsea": _bool(values, "ENRICHMENT_GSEA"),
             "go": _bool(values, "ENRICHMENT_GO"), "reactome": _bool(values, "ENRICHMENT_REACTOME"),
@@ -408,6 +447,12 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "resources": {
             "total_threads": _int(values, "MAX_TOTAL_THREADS"), "total_memory_gb": _int(values, "MAX_TOTAL_MEMORY_GB"),
             "temporary_directory": _path(values["TMP_DIR"], base),
+            "downstream": {
+                "parallel_modules": (
+                    _int(values, "DOWNSTREAM_MODULE_PARALLEL_JOBS")
+                    if _bool(values, "PARALLEL_DOWNSTREAM_MODULES") else 1
+                ),
+            },
             "preprocess": {
                 "trim_parallel_jobs": _int(values, "PREPROCESS_PARALLEL_JOBS"),
                 "star_parallel_jobs": _int(values, "STAR_PARALLEL_JOBS"),
@@ -418,16 +463,25 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
                 "samtools_sort_memory_per_thread_gb": _int(values, "SAMTOOLS_SORT_MEMORY_PER_THREAD_GB"),
                 "merge_parallel_jobs": _int(values, "SAMPLE_MERGE_PARALLEL_JOBS"), "merge_memory_gb": 16,
             },
+            "rseqc": {
+                "parallel_jobs": _int(values, "RSEQC_PARALLEL_JOBS"),
+                "threads": 1,
+                "memory_gb": _int(values, "RSEQC_MEMORY_GB"),
+            },
             "dge": {"featurecounts_threads": _int(values, "SAMTOOLS_THREADS"), "featurecounts_memory_gb": 16,
                     "contrast_parallel_jobs": _int(values, "DGE_CONTRAST_PARALLEL_JOBS"), "contrast_threads": 1, "contrast_memory_gb": 16},
             "apa_a": {"extraction_parallel_jobs": _int(values, "END_EXTRACTION_PARALLEL_JOBS"), "extraction_threads": 1,
-                      "extraction_memory_gb": 4, "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"),
+                      "extraction_memory_gb": 4,
+                      "contrast_parallel_jobs": _int_or(
+                          values, "APA_A_CONTRAST_PARALLEL_JOBS", "APA_CONTRAST_PARALLEL_JOBS"),
                       "contrast_threads": 1, "contrast_memory_gb": 16},
             "apa_b": {"engine_threads": _int(values, "APA_B_THREADS"), "engine_memory_gb": 24,
                       "endpoint_parallel_jobs": _int(values, "APA_B_ENDPOINT_PARALLEL_JOBS"),
                       "cluster_parallel_jobs": _int(values, "APA_B_CLUSTER_PARALLEL_JOBS"),
                       "deepip_threads": _int(values, "APA_B_DEEPIP_THREADS"), "sample_memory_gb": 4,
-                      "contrast_parallel_jobs": _int(values, "APA_CONTRAST_PARALLEL_JOBS"), "contrast_threads": 1,
+                      "contrast_parallel_jobs": _int_or(
+                          values, "APA_B_CONTRAST_PARALLEL_JOBS", "APA_CONTRAST_PARALLEL_JOBS"),
+                      "contrast_threads": 1,
                       "contrast_memory_gb": 16},
             "enrichment": {"parallel_jobs": _int(values, "ENRICHMENT_PARALLEL_JOBS"),
                            "threads": 1, "memory_gb": 16},

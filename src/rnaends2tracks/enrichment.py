@@ -145,6 +145,50 @@ def _index_row(
     }
 
 
+def _ensure_apa_a_gene_summaries(
+    plan: RunPlan, results: Path, script_root: Path,
+) -> None:
+    """Upgrade pre-alpha.10 APA-A indexes before enrichment.
+
+    Older result indexes did not publish the gene-level summary required by
+    enrichment.  Re-running only the APA-A statistical layer is exact and much
+    safer than approximating gene-level q-values from site-level tables.
+    """
+    legacy: list[Path] = []
+    for genome in plan.references:
+        index = results / "06_apa_a_mcell2019" / genome / "dexseq" / "result_index.tsv"
+        rows = _read(index) if index.is_file() else []
+        if rows and any(
+            not row.get("gene_summary_file")
+            or not Path(row.get("gene_summary_file", "")).is_file()
+            for row in rows
+        ):
+            legacy.append(index)
+    if not legacy:
+        return
+    event(
+        results / "logs", "enrichment", "progress",
+        "Detected pre-alpha.10 APA-A indexes; regenerating the APA-A statistical layer "
+        "to publish exact gene-level enrichment sources",
+    )
+    from .apa_mcell import apa_statistics_stage
+
+    apa_statistics_stage(plan, results, script_root, dry_run=False, force=True)
+    unresolved = [
+        path for path in legacy
+        if any(
+            not row.get("gene_summary_file")
+            or not Path(row.get("gene_summary_file", "")).is_file()
+            for row in _read(path)
+        )
+    ]
+    if unresolved:
+        raise RuntimeError(
+            "APA-A compatibility regeneration did not publish gene summaries: "
+            + ", ".join(map(str, unresolved))
+        )
+
+
 def enrichment(
     plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False, force: bool = False,
 ) -> None:
@@ -161,6 +205,8 @@ def enrichment(
         event(log_dir, "enrichment", "dry_run", "Would run ORA and ranked GSEA for enabled DGE/APA contrasts")
         return
     require_tools(["Rscript"])
+    if apa_enabled:
+        _ensure_apa_a_gene_summaries(plan, results, script_root)
     settings = plan.project["enrichment"]
     fdr = float(plan.project["reporting"]["fdr"])
     enrichment_padj = float(settings["padj"])

@@ -3,9 +3,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rnaends2tracks.config import RunPlan
-from rnaends2tracks.enrichment import _apa_gene_table, _dge_gene_table
+from rnaends2tracks.enrichment import (
+    _apa_gene_table, _dge_gene_table, _ensure_apa_a_gene_summaries,
+)
 from rnaends2tracks.provenance import generate_provenance_dashboard
 
 
@@ -22,6 +25,24 @@ def read_tsv(path):
 
 
 class EnrichmentTests(unittest.TestCase):
+    def test_legacy_apa_a_index_is_regenerated_exactly_before_enrichment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "results"
+            index = results / "06_apa_a_mcell2019" / "GRCm39" / "dexseq" / "result_index.tsv"
+            write_tsv(index, ["contrast_id", "result_file"], [{"contrast_id": "x", "result_file": "old.tsv"}])
+            plan = RunPlan({}, [], [], [], {}, {"GRCm39": {"assembly": "GRCm39"}})
+
+            def regenerate(*_args, **_kwargs):
+                summary = index.parent / "x.gene_apa_summary.tsv"
+                write_tsv(summary, ["gene_id", "gene_padj"], [{"gene_id": "g1", "gene_padj": "0.1"}])
+                write_tsv(index, ["contrast_id", "gene_summary_file"], [
+                    {"contrast_id": "x", "gene_summary_file": str(summary)},
+                ])
+
+            with patch("rnaends2tracks.apa_mcell.apa_statistics_stage", side_effect=regenerate) as mocked:
+                _ensure_apa_a_gene_summaries(plan, results, Path(temporary))
+            mocked.assert_called_once()
+
     def test_dge_preparation_uses_tested_background_and_directional_foregrounds(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); source = root / "dge.tsv"; target = root / "prepared.tsv"

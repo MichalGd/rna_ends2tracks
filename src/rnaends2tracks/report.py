@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import html
 import json
+import re
+import shlex
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -15,11 +17,28 @@ from .receipts import receipt_valid, write_receipt
 
 CONTRAST_SUMMARY_FIELDS = [
     "genome", "contrast_id", "numerator", "denominator", "design_mode",
+    "paired", "n_pairs", "resolved_design",
     "dge_tested_genes", "dge_significant", "dge_up", "dge_down",
-    "apa_a_tested_sites", "apa_a_significant_sites", "apa_a_distal_genes",
+    "apa_a_tested_genes", "apa_a_significant_genes", "apa_a_tested_sites",
+    "apa_a_significant_sites", "apa_a_distal_genes",
     "apa_a_proximal_genes", "apa_a_pcpa", "apa_b_tested_sites",
-    "apa_b_confirmed_sites", "apa_b_pcpa", "apa_compared_sites",
-    "apa_direction_agree", "apa_direction_disagree",
+    "apa_b_tested_genes", "apa_b_significant_genes", "apa_b_confirmed_sites",
+    "apa_b_distal_genes", "apa_b_proximal_genes", "apa_b_pcpa", "apa_compared_sites",
+    "apa_direction_agree", "apa_direction_disagree", "apa_direction_agreement_pct",
+]
+
+DGE_EVENT_FIELDS = [
+    "genome", "contrast_id", "gene_id", "baseMean", "log2FoldChange",
+    "pvalue", "padj", "direction",
+]
+APA_EVENT_FIELDS = [
+    "method", "genome", "contrast_id", "gene_id", "gene_padj", "shift",
+    "max_abs_delta_PAU", "weighted_transcript_position_shift_nt",
+    "significant_or_confirmed_sites", "pcpa_candidate",
+]
+ENRICHMENT_TERM_FIELDS = [
+    "analysis_type", "genome", "contrast_id", "method", "query", "database",
+    "term_id", "term_name", "effect", "padj",
 ]
 
 TRACK_COLLECTION_ORDER = [
@@ -174,17 +193,26 @@ def _contrast_summary(
                 "numerator": contrast.get("numerator", ""),
                 "denominator": contrast.get("denominator", ""),
                 "design_mode": contrast.get("design_mode", ""),
+                "paired": contrast.get("paired", ""),
+                "n_pairs": contrast.get("n_pairs", ""),
+                "resolved_design": contrast.get("resolved_design", ""),
                 "dge_tested_genes": "",
                 "dge_significant": "",
                 "dge_up": "",
                 "dge_down": "",
                 "apa_a_tested_sites": "",
+                "apa_a_tested_genes": "",
+                "apa_a_significant_genes": "",
                 "apa_a_significant_sites": "",
                 "apa_a_distal_genes": "",
                 "apa_a_proximal_genes": "",
                 "apa_a_pcpa": "" if apa_a_pcpa is None else apa_a_pcpa[contrast_id],
                 "apa_b_tested_sites": "",
+                "apa_b_tested_genes": "",
+                "apa_b_significant_genes": "",
                 "apa_b_confirmed_sites": "",
+                "apa_b_distal_genes": "",
+                "apa_b_proximal_genes": "",
                 "apa_b_pcpa": "" if apa_b_pcpa is None else apa_b_pcpa[contrast_id],
                 "apa_compared_sites": "",
                 "apa_direction_agree": "",
@@ -212,6 +240,17 @@ def _contrast_summary(
                     "apa_a_distal_genes": shifts["distal"],
                     "apa_a_proximal_genes": shifts["proximal"],
                 })
+                gene_summary = Path(index.get("gene_summary_file", ""))
+                if gene_summary.is_file():
+                    genes = _required_rows(gene_summary, "APA-A gene summary")
+                    row.update({
+                        "apa_a_tested_genes": len(genes),
+                        "apa_a_significant_genes": sum(
+                            _number(item.get("gene_padj")) is not None
+                            and _number(item.get("gene_padj")) <= fdr
+                            for item in genes
+                        ),
+                    })
             if contrast_id in apa_b_index:
                 index = apa_b_index[contrast_id]
                 tested, confirmed = _tested_significant(
@@ -223,7 +262,27 @@ def _contrast_summary(
                     "apa_b_tested_sites": tested,
                     "apa_b_confirmed_sites": confirmed,
                 })
+                gene_summary = Path(index.get("gene_summary_file", ""))
+                if gene_summary.is_file():
+                    genes = _required_rows(gene_summary, "APA-B gene summary")
+                    significant_genes = [
+                        item for item in genes
+                        if _number(item.get("gene_padj")) is not None
+                        and _number(item.get("gene_padj")) <= fdr
+                    ]
+                    shifts = Counter(item.get("shift", "") for item in significant_genes)
+                    row.update({
+                        "apa_b_tested_genes": len(genes),
+                        "apa_b_significant_genes": len(significant_genes),
+                        "apa_b_distal_genes": shifts["distal"],
+                        "apa_b_proximal_genes": shifts["proximal"],
+                    })
             row.update(comparison.get(contrast_id, {}))
+            compared = int(row.get("apa_compared_sites") or 0)
+            agreed = int(row.get("apa_direction_agree") or 0)
+            row["apa_direction_agreement_pct"] = (
+                f"{100 * agreed / compared:.2f}" if compared else ""
+            )
             summary.append(row)
     return summary
 
@@ -231,7 +290,10 @@ def _contrast_summary(
 def _write_tsv(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
+        writer = csv.DictWriter(
+            handle, fieldnames=fields, delimiter="\t", lineterminator="\n",
+            extrasaction="ignore",
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -290,7 +352,7 @@ def _apa_b_interpretation(plan: RunPlan) -> tuple[str, list[dict[str, Any]]]:
 def _apa_b_gene_events(results: Path, fdr: float, limit: int = 100) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     root = results / "07_apa_b"
-    for index_path in sorted(root.rglob("result_index.tsv")) if root.is_dir() else []:
+    for index_path in sorted(root.glob("*/drimseq/result_index.tsv")) if root.is_dir() else []:
         genome = index_path.relative_to(root).parts[0]
         for index in _rows(index_path):
             summary = Path(index.get("gene_summary_file", ""))
@@ -310,6 +372,113 @@ def _apa_b_gene_events(results: Path, fdr: float, limit: int = 100) -> list[dict
                 })
     events.sort(key=lambda row: float(row["gene_padj"]))
     return events[:limit]
+
+
+def _top_dge_events(results: Path, fdr: float, limit_per_contrast: int = 25) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    root = results / "05_gene_expression"
+    # C4 active-PAS gene sums are the primary DGE result.  C5 featureCounts is
+    # diagnostic only and must not be mixed into the biological summary.
+    for index_path in sorted(root.glob("*/C4_primary_deseq2/result_index.tsv")) if root.is_dir() else []:
+        genome = index_path.relative_to(root).parts[0]
+        for index in _rows(index_path):
+            result = Path(index.get("result_file", ""))
+            if not result.is_file():
+                continue
+            selected = []
+            for row in _rows(result):
+                padj = _number(row.get("padj"))
+                effect = _number(row.get("log2FoldChange"))
+                if padj is None or padj > fdr or effect is None:
+                    continue
+                selected.append((padj, -abs(effect), row.get("gene_id", ""), row, effect))
+            for _padj, _rank, _gene, row, effect in sorted(selected, key=lambda item: item[:3])[:limit_per_contrast]:
+                events.append({
+                    "genome": genome, "contrast_id": index.get("contrast_id", ""),
+                    "gene_id": row.get("gene_id", ""), "baseMean": row.get("baseMean", ""),
+                    "log2FoldChange": row.get("log2FoldChange", ""),
+                    "pvalue": row.get("pvalue", ""), "padj": row.get("padj", ""),
+                    "direction": "up" if effect > 0 else "down",
+                })
+    return events
+
+
+def _top_apa_events(results: Path, fdr: float, limit_per_contrast: int = 25) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    definitions = (
+        ("APA-A", results / "06_apa_a_mcell2019", "significant_sites"),
+        ("APA-B", results / "07_apa_b", "confirmed_sites"),
+    )
+    for method, root, site_field in definitions:
+        if not root.is_dir():
+            continue
+        pcpa_by_genome: dict[str, set[tuple[str, str]]] = {}
+        for pcpa_path in root.glob("*/candidate_pcpa.tsv"):
+            genome = pcpa_path.parent.name
+            pcpa_by_genome[genome] = {
+                (row.get("contrast_id", ""), row.get("gene_id", "")) for row in _rows(pcpa_path)
+            }
+        for index_path in sorted(root.rglob("result_index.tsv")):
+            genome = index_path.relative_to(root).parts[0]
+            for index in _rows(index_path):
+                summary = Path(index.get("gene_summary_file", ""))
+                if not summary.is_file():
+                    continue
+                selected = []
+                for row in _rows(summary):
+                    padj = _number(row.get("gene_padj"))
+                    effect = _number(row.get("max_abs_delta_PAU")) or 0.0
+                    if padj is not None and padj <= fdr:
+                        selected.append((padj, -abs(effect), row.get("gene_id", ""), row))
+                for _padj, _effect, _gene, row in sorted(
+                    selected, key=lambda item: item[:3]
+                )[:limit_per_contrast]:
+                    contrast_id = index.get("contrast_id", "")
+                    gene_id = row.get("gene_id", "")
+                    events.append({
+                        "method": method, "genome": genome, "contrast_id": contrast_id,
+                        "gene_id": gene_id, "gene_padj": row.get("gene_padj", ""),
+                        "shift": row.get("shift", ""),
+                        "max_abs_delta_PAU": row.get("max_abs_delta_PAU", ""),
+                        "weighted_transcript_position_shift_nt": row.get(
+                            "weighted_transcript_position_shift_nt", ""),
+                        "significant_or_confirmed_sites": row.get(site_field, ""),
+                        "pcpa_candidate": str(
+                            (contrast_id, gene_id) in pcpa_by_genome.get(genome, set())
+                        ).lower(),
+                    })
+    return events
+
+
+def _top_enrichment_terms(
+    enrichment_rows: list[dict[str, str]], fdr: float, limit_per_job: int = 10,
+) -> list[dict[str, Any]]:
+    terms: list[dict[str, Any]] = []
+    for index in enrichment_rows:
+        for method, field in (("ORA", "ora_file"), ("GSEA", "gsea_file")):
+            selected: list[tuple[float, dict[str, Any]]] = []
+            source = Path(index.get(field, ""))
+            if not source.is_file():
+                continue
+            for row in _rows(source):
+                padj = _number(row.get("padj"))
+                if padj is None or padj > fdr:
+                    continue
+                effect = row.get("NES", "") if method == "GSEA" else row.get("overlap_count", "")
+                selected.append((padj, {
+                    "analysis_type": index.get("analysis_type", ""),
+                    "genome": index.get("genome", ""),
+                    "contrast_id": index.get("contrast_id", ""), "method": method,
+                    "query": row.get("query", ""), "database": row.get("database", ""),
+                    "term_id": row.get("term_id", ""), "term_name": row.get("term_name", ""),
+                    "effect": effect, "padj": row.get("padj", ""),
+                }))
+            # Keep both analyses visible: a large ORA result must not crowd all
+            # ranked GSEA terms (or vice versa) out of the final report.
+            terms.extend(
+                row for _padj, row in sorted(selected, key=lambda item: item[0])[:limit_per_job]
+            )
+    return terms
 
 
 def _track_collections(results: Path) -> tuple[list[Path], list[dict[str, Any]]]:
@@ -340,7 +509,9 @@ def _ucsc_track_line(
     # The optional public destination is deliberately flat: generated BigWig
     # basenames already contain sample, family, normalization and strand.
     url = f"{public_prefix}/{path.name}" if public_prefix else f"{relative_prefix}/{relative}"
-    clean_description = f"{description}: {path.name}".replace('"', "'")
+    # UCSC custom-track labels are intentionally conservative: name <=15 and
+    # description <=60 characters. The full filename remains in bigDataUrl.
+    clean_description = f"{description}: {path.name}".replace('"', "'")[:60]
     fields = [
         "track", "type=bigWig", f'name="rna_ends_{index:04d}"',
         f'description="{clean_description}"', f"bigDataUrl={url}", "visibility=full",
@@ -351,6 +522,78 @@ def _ucsc_track_line(
     if negate_minus and "transcript_minus" in path.name:
         fields.append("negateValues=on")
     return " ".join(fields)
+
+
+def _validate_ucsc_track_lines(lines: list[str], source: str = "descriptor") -> int:
+    """Validate the one-line UCSC bigWig custom-track contract."""
+    required = {"type", "name", "description", "bigDataUrl"}
+    names: set[str] = set()
+    count = 0
+    for number, raw in enumerate(lines, 1):
+        if "\n" in raw or "\r" in raw:
+            raise RuntimeError(f"UCSC descriptor is not one line at {source}:{number}")
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            tokens = shlex.split(line, posix=True)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid UCSC quoting at {source}:{number}: {exc}") from exc
+        if not tokens or tokens[0] != "track":
+            raise RuntimeError(f"UCSC descriptor must start with 'track' at {source}:{number}")
+        attributes: dict[str, str] = {}
+        for token in tokens[1:]:
+            if "=" not in token:
+                raise RuntimeError(f"Invalid UCSC key=value token at {source}:{number}: {token}")
+            key, value = token.split("=", 1)
+            if not key or not value or key in attributes:
+                raise RuntimeError(f"Invalid or duplicate UCSC attribute at {source}:{number}: {key}")
+            attributes[key] = value
+        missing = sorted(required.difference(attributes))
+        if missing:
+            raise RuntimeError(f"Missing UCSC attributes at {source}:{number}: {', '.join(missing)}")
+        if attributes["type"] != "bigWig":
+            raise RuntimeError(f"UCSC track type must be bigWig at {source}:{number}")
+        name = attributes["name"]
+        if len(name) > 15 or name in names:
+            raise RuntimeError(f"Invalid or duplicate UCSC track name at {source}:{number}: {name}")
+        names.add(name)
+        if len(attributes["description"]) > 60:
+            raise RuntimeError(f"UCSC description exceeds 60 characters at {source}:{number}")
+        url = attributes["bigDataUrl"]
+        if (any(character.isspace() for character in url)
+                or any(character in url for character in "[]")
+                or not (url.startswith(("http://", "https://", "../", "./")))
+                or not url.lower().endswith((".bw", ".bigwig"))):
+            raise RuntimeError(f"Invalid UCSC bigDataUrl at {source}:{number}: {url}")
+        color = attributes.get("color", "")
+        if color:
+            components = color.split(",")
+            if len(components) != 3 or any(
+                not component.isdigit() or not 0 <= int(component) <= 255
+                for component in components
+            ):
+                raise RuntimeError(f"Invalid UCSC RGB color at {source}:{number}: {color}")
+        view_limits = attributes.get("viewLimits", "")
+        if view_limits and not re.fullmatch(
+            r"-?[0-9]+(?:\.[0-9]+)?:-?[0-9]+(?:\.[0-9]+)?", view_limits,
+        ):
+            raise RuntimeError(f"Invalid UCSC viewLimits at {source}:{number}: {view_limits}")
+        if attributes.get("negateValues") not in {None, "on", "off"}:
+            raise RuntimeError(f"Invalid UCSC negateValues at {source}:{number}")
+        for key in ("autoScale", "alwaysZero", "gridDefault"):
+            if attributes.get(key) not in {None, "on", "off"}:
+                raise RuntimeError(f"Invalid UCSC {key} at {source}:{number}")
+        if attributes.get("priority") and not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", attributes["priority"]):
+            raise RuntimeError(f"Invalid UCSC priority at {source}:{number}")
+        if attributes.get("maxHeightPixels") and not re.fullmatch(
+            r"[0-9]+:[0-9]+:[0-9]+", attributes["maxHeightPixels"],
+        ):
+            raise RuntimeError(f"Invalid UCSC maxHeightPixels at {source}:{number}")
+        count += 1
+    if not count:
+        raise RuntimeError(f"No UCSC track definitions were generated in {source}")
+    return count
 
 
 def _browser_assets(
@@ -375,13 +618,28 @@ def _browser_assets(
 
     descriptor_dir = outdir / "ucsc_track_descriptors"
     descriptor_dir.mkdir(parents=True, exist_ok=True)
+    # Alpha.10 originally placed this compatibility file beside the folder.
+    # Remove that workflow-owned stale copy so every UCSC descriptor has one home.
+    (outdir / "UCSC_trackDb.txt").unlink(missing_ok=True)
+    # Remove only filenames owned by previous exporter layouts. This prevents
+    # stale collection/family descriptors surviving a forced report rebuild.
+    known_groups = set(TRACK_COLLECTION_ORDER) | {
+        str(row["collection"]) for row in collection_rows
+    }
+    known_families = {group.split("/", 1)[0] for group in known_groups}
+    for stale in [
+        *(descriptor_dir / f"{group.replace('/', '__')}.txt" for group in known_groups),
+        *(descriptor_dir / f"{family}.txt" for family in known_families),
+    ]:
+        stale.unlink(missing_ok=True)
     combined = descriptor_dir / "UCSC_bigWig_tracks.oneline.txt"
     generated: list[Path] = [inventory, combined]
     all_lines: list[str] = []
+    family_lines: dict[str, list[str]] = {}
     track_index = 0
-    track_numbers: dict[Path, int] = {}
     for group_index, row in enumerate(collection_rows):
         group = str(row["collection"])
+        family = group.split("/", 1)[0]
         description = str(row["description"])
         color = TRACK_COLLECTION_COLORS[group_index % len(TRACK_COLLECTION_COLORS)]
         group_lines = [f"# {group} - {description}"]
@@ -389,52 +647,64 @@ def _browser_assets(
             if path.relative_to(track_root).parent.as_posix() != group:
                 continue
             track_index += 1
-            track_numbers[path] = track_index
             group_lines.append(_ucsc_track_line(
                 path, track_root, track_index, color, description, public_prefix,
                 "../../09_tracks", negate_minus, view_limits,
             ))
-        group_file = descriptor_dir / f"{group.replace('/', '__')}.txt"
-        group_file.write_text("\n".join(group_lines) + "\n", encoding="utf-8")
-        generated.append(group_file)
+        family_lines.setdefault(family, []).extend([*group_lines, ""])
         all_lines.extend([*group_lines, ""])
-    combined.write_text("\n".join(all_lines).rstrip() + "\n", encoding="utf-8")
+    if all_lines:
+        _validate_ucsc_track_lines(all_lines, combined.name)
+        combined.write_text("\n".join(all_lines).rstrip() + "\n", encoding="utf-8")
+    else:
+        combined.write_text("# No BigWig tracks were generated.\n", encoding="utf-8")
 
-    trackdb = outdir / "UCSC_trackDb.txt"
-    legacy_lines: list[str] = []
-    for group_index, row in enumerate(collection_rows):
-        group = str(row["collection"])
-        description = str(row["description"])
-        color = TRACK_COLLECTION_COLORS[group_index % len(TRACK_COLLECTION_COLORS)]
-        legacy_lines.extend([f"# {group} - {description}"])
-        for path in bigwigs:
-            if path.relative_to(track_root).parent.as_posix() != group:
-                continue
-            legacy_lines.append(_ucsc_track_line(
-                path, track_root, track_numbers[path], color, description, public_prefix,
-                "../09_tracks", negate_minus, view_limits,
-            ))
-        legacy_lines.append("")
-    trackdb.write_text("\n".join(legacy_lines).rstrip() + "\n", encoding="utf-8")
+    validation_rows: list[dict[str, Any]] = []
+    for family, lines in family_lines.items():
+        target = descriptor_dir / f"{family}.txt"
+        count = _validate_ucsc_track_lines(lines, target.name)
+        target.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        generated.append(target)
+        validation_rows.append({"file": target.name, "track_lines": count, "status": "PASS"})
+    trackdb = descriptor_dir / "UCSC_trackDb.txt"
+    trackdb.write_text(combined.read_text(encoding="utf-8"), encoding="utf-8")
+    generated.append(trackdb)
+    combined_status = "PASS" if track_index else "NO_TRACKS"
+    validation_rows.extend([
+        {"file": combined.name, "track_lines": track_index, "status": combined_status},
+        {"file": trackdb.name, "track_lines": track_index, "status": combined_status},
+    ])
+    validation = descriptor_dir / "UCSC_descriptor_validation.tsv"
+    _write_tsv(validation, validation_rows, ["file", "track_lines", "status"])
+    generated.append(validation)
     igv = outdir / "IGV_session.xml"
     resources = "\n".join(
         f'    <Resource path="../{html.escape(path.relative_to(results).as_posix())}"/>' for path in bigwigs
     )
     igv.write_text(f'<?xml version="1.0" encoding="UTF-8"?>\n<Session version="8">\n  <Resources>\n{resources}\n  </Resources>\n</Session>\n',
                    encoding="utf-8")
-    generated.extend([trackdb, igv])
+    generated.append(igv)
     return generated, collection_rows
 
 
 def _main_artifacts(results: Path, outdir: Path) -> list[dict[str, str]]:
     candidates: list[tuple[str, Path]] = [
         ("MultiQC report", results / "01_qc" / "multiqc" / "multiqc_report.html"),
+        ("RSeQC MultiQC report", results / "01_qc" / "rseqc" / "multiqc" / "multiqc_report.html"),
+        ("RSeQC sample summary", results / "01_qc" / "rseqc" / "rseqc_summary.tsv"),
+        ("RSeQC gene-body coverage", results / "01_qc" / "rseqc" / "gene_body_coverage.svg"),
         ("Protocol-orientation audit", results / "02_alignment" / "protocol_orientation.tsv"),
         ("Track normalization table", results / "09_tracks" / "track_normalization.tsv"),
         ("One-column BigWig inventory", outdir / "bigwig_collections.txt"),
         ("Combined one-line UCSC descriptors", outdir / "ucsc_track_descriptors" / "UCSC_bigWig_tracks.oneline.txt"),
+        ("UCSC descriptor validation", outdir / "ucsc_track_descriptors" / "UCSC_descriptor_validation.tsv"),
         ("IGV session", outdir / "IGV_session.xml"),
         ("Full contrast summary", outdir / "contrast_summary.tsv"),
+        ("Differential gene-expression summary", outdir / "differential_gene_expression_summary.tsv"),
+        ("Top differential genes", outdir / "top_differential_genes.tsv"),
+        ("Alternative-polyadenylation summary", outdir / "alternative_polyadenylation_summary.tsv"),
+        ("Top APA gene events", outdir / "top_apa_gene_events.tsv"),
+        ("Top enrichment terms", outdir / "top_enrichment_terms.tsv"),
         ("Enrichment result index", outdir / "enrichment_summary" / "enrichment_index.tsv"),
         ("Provenance dashboard", outdir / "provenance_dashboard" / "dashboard.json"),
         ("Receipt inventory", outdir / "provenance_dashboard" / "receipt_inventory.tsv"),
@@ -546,6 +816,7 @@ def make_report(
         for directory in (
             "02_alignment", "03_exact_ends", "04_active_pas", "05_gene_expression",
             "06_apa_a_mcell2019", "07_apa_b", "08_apa_comparison", "09_tracks",
+            "01_qc/rseqc",
         )
     )
     result_indexes = sorted((results / "05_gene_expression").rglob("result_index.tsv"))
@@ -554,7 +825,7 @@ def make_report(
     inputs.extend(result_indexes)
     for index_path in result_indexes:
         for row in _rows(index_path):
-            for field in ("result_file", "shift_file"):
+            for field in ("result_file", "shift_file", "gene_summary_file"):
                 if row.get(field):
                     inputs.append(Path(row[field]))
     inputs.extend(sorted((results / "06_apa_a_mcell2019").rglob("candidate_pcpa.tsv")))
@@ -562,10 +833,22 @@ def make_report(
     inputs.append(results / "08_apa_comparison" / "effect_concordance.tsv")
     inputs.extend(sorted((results / "02_alignment").rglob("*Log.final.out")))
     inputs.append(results / "02_alignment" / "protocol_orientation.tsv")
+    inputs.extend([
+        results / "01_qc" / "rseqc" / "rseqc_summary.tsv",
+        results / "01_qc" / "rseqc" / "gene_body_coverage.tsv",
+        results / "01_qc" / "rseqc" / "gene_body_coverage.svg",
+    ])
     inputs.extend(sorted((results / "03_exact_ends").glob("*/*/end_audit.json")))
     inputs.extend(sorted((results / "04_active_pas").glob("*/count_universe_audit.json")))
     inputs.extend(sorted((results / "05_gene_expression").rglob("*.png")))
+    enrichment_index_path = results / "10_reports" / "enrichment_summary" / "enrichment_index.tsv"
     inputs.extend(sorted((results / "10_reports" / "enrichment_summary").rglob("*.tsv")))
+    for row in _rows(enrichment_index_path):
+        for field in (
+            "prepared_gene_table", "ora_file", "gsea_file", "mapping_audit", "provenance_file",
+        ):
+            if row.get(field):
+                inputs.append(Path(row[field]))
     inputs.append(results / "10_reports" / "enrichment_summary" / "run_receipt.json")
     validation_manifest = Path(str(plan.project.get("apa_b", {}).get("validation_manifest", "")))
     if validation_manifest.is_file():
@@ -578,6 +861,7 @@ def make_report(
             key: plan.project.get("tracks", {}).get(key)
             for key in ("ucsc_bigdata_url_prefix", "ucsc_negate_minus_tracks", "ucsc_view_limits")
         },
+        "rseqc": plan.project.get("rseqc", {}),
     })
     html_target = outdir / "report.html"
     if not force and receipt_valid(outdir, signature):
@@ -596,6 +880,7 @@ def make_report(
     )
     modules = [
         ("alignment", "02_alignment", True),
+        ("RSeQC", "01_qc/rseqc", enabled_modules.get("rseqc", False)),
         ("exact ends", "03_exact_ends", requirements["exact_ends"]),
         ("active PAS", "04_active_pas", requirements["active_pas"]),
         ("gene expression", "05_gene_expression", enabled_modules.get("gene_expression", True)),
@@ -616,15 +901,44 @@ def make_report(
     contrast_rows = _contrast_summary(plan, results, contrasts)
     contrast_summary = outdir / "contrast_summary.tsv"
     _write_tsv(contrast_summary, contrast_rows, CONTRAST_SUMMARY_FIELDS)
+    dge_summary = outdir / "differential_gene_expression_summary.tsv"
+    dge_fields = [
+        "genome", "contrast_id", "numerator", "denominator", "design_mode",
+        "paired", "n_pairs", "resolved_design",
+        "dge_tested_genes", "dge_significant", "dge_up", "dge_down",
+    ]
+    _write_tsv(dge_summary, contrast_rows, dge_fields)
+    apa_summary = outdir / "alternative_polyadenylation_summary.tsv"
+    apa_fields = [
+        field for field in CONTRAST_SUMMARY_FIELDS
+        if field in {
+            "genome", "contrast_id", "numerator", "denominator", "design_mode",
+            "paired", "n_pairs", "resolved_design",
+        }
+        or field.startswith("apa_")
+    ]
+    _write_tsv(apa_summary, contrast_rows, apa_fields)
     browser, track_rows = _browser_assets(plan, results, outdir)
-    provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
-    artifact_rows = _main_artifacts(results, outdir)
     samples = _rows(results / "00_metadata" / "validated_samples.tsv")
     star_rows = _star_qc_rows(results)
     orientation_rows = _rows(results / "02_alignment" / "protocol_orientation.tsv")
+    rseqc_rows = _rows(results / "01_qc" / "rseqc" / "rseqc_summary.tsv")
     funnel_rows = _exact_funnel_rows(results)
     active_pas_rows = _active_pas_rows(results)
     enrichment_rows = _rows(outdir / "enrichment_summary" / "enrichment_index.tsv")
+    report_fdr = float(plan.project.get("reporting", {}).get("fdr", 0.05))
+    enrichment_fdr = float(plan.project.get("enrichment", {}).get("padj", 0.05))
+    dge_events = _top_dge_events(results, report_fdr)
+    apa_events = _top_apa_events(results, report_fdr)
+    enrichment_terms = _top_enrichment_terms(enrichment_rows, enrichment_fdr)
+    dge_events_path = outdir / "top_differential_genes.tsv"
+    apa_events_path = outdir / "top_apa_gene_events.tsv"
+    enrichment_terms_path = outdir / "top_enrichment_terms.tsv"
+    _write_tsv(dge_events_path, dge_events, DGE_EVENT_FIELDS)
+    _write_tsv(apa_events_path, apa_events, APA_EVENT_FIELDS)
+    _write_tsv(enrichment_terms_path, enrichment_terms, ENRICHMENT_TERM_FIELDS)
+    provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
+    artifact_rows = _main_artifacts(results, outdir)
     apa_b_status, apa_b_rows = _apa_b_interpretation(plan)
     apa_b_gene_events = _apa_b_gene_events(
         results, float(plan.project.get("reporting", {}).get("fdr", 0.05)),
@@ -644,6 +958,10 @@ def make_report(
         (f"{row.get('genome', '')} {row.get('contrast_id', '')} {row.get('analysis_type', '')} enrichment",
          Path(row["plot_png"]))
         for row in enrichment_rows if row.get("plot_png")
+    ]
+    rseqc_images = [
+        ("RSeQC gene-body coverage (5-prime to 3-prime)",
+         results / "01_qc" / "rseqc" / "gene_body_coverage.svg"),
     ]
     sample_fields = [field for field in (
         "sample_id", "description", "genome", "condition", "batch", "subject",
@@ -667,16 +985,39 @@ def make_report(
         f"{row.get('design_mode', '')} | `{row.get('resolved_design', '')}` |" for row in contrasts
     )
     lines += [
+        "", "## RSeQC annotation-aware QC", "",
+        "RSeQC uses the exact selected annotation converted to BED12 (or the configured assembly-matched BED12).",
+        "For QuantSeq REV, enrichment toward the transcript 3-prime end is expected; this is assay behavior, not conventional whole-transcript uniformity.",
+        "",
+        "| Sample | Genome | Condition | Dominant orientation | 5-prime fraction | 3-prime fraction | 3:5 ratio | 3-prime enriched |",
+        "|---|---|---|---|---:|---:|---:|---|",
+    ]
+    lines.extend(
+        f"| {row.get('sample_id', '')} | {row.get('genome', '')} | {row.get('condition', '')} | "
+        f"{row.get('dominant_orientation', '')} | {row.get('five_prime_fraction', '')} | "
+        f"{row.get('three_prime_fraction', '')} | {row.get('three_to_five_ratio', '')} | "
+        f"{row.get('quantseq_three_prime_enriched', '')} |" for row in rseqc_rows
+    )
+    if not rseqc_rows:
+        lines.append("| unavailable |  |  |  |  |  |  |  |")
+    lines += [
         "", "## Differential and APA summary", "",
-        "| Contrast | DGE significant | DGE up | DGE down | APA-A significant sites | Distal genes | Proximal genes | PCPA |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| Contrast | DGE significant | DGE up | DGE down | APA-A significant genes | APA-A significant sites | APA-B significant genes | APA-B confirmed sites | PCPA A/B | Agreement % |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     lines.extend(
         f"| {row['contrast_id']} | {row['dge_significant']} | {row['dge_up']} | {row['dge_down']} | "
-        f"{row['apa_a_significant_sites']} | {row['apa_a_distal_genes']} | "
-        f"{row['apa_a_proximal_genes']} | {row['apa_a_pcpa']} |"
+        f"{row['apa_a_significant_genes']} | {row['apa_a_significant_sites']} | "
+        f"{row['apa_b_significant_genes']} | {row['apa_b_confirmed_sites']} | "
+        f"{row['apa_a_pcpa']}/{row['apa_b_pcpa']} | {row['apa_direction_agreement_pct']} |"
         for row in contrast_rows
     )
+    lines += [
+        "", "Detailed, sortable result summaries:", "",
+        "- `differential_gene_expression_summary.tsv` and `top_differential_genes.tsv`",
+        "- `alternative_polyadenylation_summary.tsv` and `top_apa_gene_events.tsv`",
+        "- `top_enrichment_terms.tsv`",
+    ]
     lines += ["", "## Gene-set enrichment", "",
               "| Analysis | Genome | Contrast | Foreground genes | Significant ORA | Significant GSEA |",
               "|---|---|---|---:|---:|---:|"]
@@ -708,7 +1049,9 @@ def make_report(
         "", "## Main files", "",
         "- `bigwig_collections.txt`: one-column, collection-grouped BigWig inventory.",
         "- `ucsc_track_descriptors/UCSC_bigWig_tracks.oneline.txt`: combined UCSC custom-track lines.",
-        "- `UCSC_trackDb.txt`: compatibility copy using the same one-line syntax.",
+        "- `ucsc_track_descriptors/<family>.txt`: one-line descriptors separated by normalization group.",
+        "- `ucsc_track_descriptors/UCSC_trackDb.txt`: compatibility copy using the same one-line syntax.",
+        "- `ucsc_track_descriptors/UCSC_descriptor_validation.tsv`: syntax-validation audit.",
         "- `IGV_session.xml`: session containing every generated BigWig.",
         "- `provenance_dashboard/`: receipt, environment, reference and complete output inventories.",
     ]
@@ -767,6 +1110,19 @@ def make_report(
             "star_reverse_count", "reverse_compatible_fraction", "status",
         ) if any(field in row for row in orientation_rows)])
         if orientation_rows else "<p>Orientation audit was not available.</p>",
+        "<h3>RSeQC annotation-aware QC</h3>",
+        "<p><code>infer_experiment.py</code> independently checks library orientation; "
+        "<code>read_distribution.py</code> reports annotated genomic-feature distribution; and "
+        "<code>geneBody_coverage.py</code> measures relative coverage from transcript 5-prime to 3-prime. "
+        "QuantSeq REV should be strongly 3-prime enriched, so a non-uniform gene-body profile is expected.</p>",
+        _html_table(rseqc_rows, [field for field in (
+            "sample_id", "genome", "condition", "infer_undetermined_fraction",
+            "infer_forward_fraction", "infer_reverse_fraction", "dominant_orientation",
+            "five_prime_fraction", "three_prime_fraction", "three_to_five_ratio",
+            "quantseq_three_prime_enriched",
+        ) if any(field in row for row in rseqc_rows)])
+        if rseqc_rows else "<p>RSeQC was disabled or its outputs were unavailable.</p>",
+        _image_gallery(outdir, rseqc_images),
         "<h3>Exact-end filtering funnel</h3>",
         _html_table(funnel_rows, ["sample_id", "genome", "C0", "C1", "C1S", "C2", "C2R",
                                   "C1_over_C0_pct", "C2_over_C1_pct", "mask_rescued"])
@@ -776,9 +1132,18 @@ def make_report(
                                      "C3_over_C2_pct", "ambiguous_pas", "pcpa_candidate_sites"])
         if active_pas_rows else "<p>Active-PAS audits were not available.</p>",
         "<h2 id='results'>Contrast-level results</h2>",
-        "<p>Blank cells mean that the corresponding optional analysis was disabled or unavailable.</p>",
+        "<p>Blank cells mean that the corresponding optional analysis was disabled or unavailable. "
+        "Counts are recalculated from the result tables and checked against each module index before the report is published.</p>",
         "<label>Filter contrasts: <input id='contrast-filter' type='search' placeholder='condition, genome, result...'></label>",
         _html_table(contrast_rows, CONTRAST_SUMMARY_FIELDS, "contrast-table"),
+        "<h3>Top differential genes</h3>",
+        "<p>Up to 25 FDR-significant genes per contrast, ordered by adjusted p-value and absolute fold change. "
+        "The complete DESeq2 tables remain linked in the output manifest.</p>",
+        _html_table(dge_events, DGE_EVENT_FIELDS) if dge_events else "<p>No DGE gene passed the configured FDR.</p>",
+        "<h3>Top APA gene-level events</h3>",
+        "<p>Up to 25 FDR-significant genes per method and contrast. APA-A and APA-B remain independent; "
+        "candidate PCPA marks intragenic premature cleavage/polyadenylation candidates, not proven termination.</p>",
+        _html_table(apa_events, APA_EVENT_FIELDS) if apa_events else "<p>No APA gene passed the configured FDR.</p>",
         "<h2 id='plots'>DGE exploratory and contrast plots</h2>",
         "<p>PCA and sample-distance plots use variance-stabilized C4 counts. MA and volcano plots are "
         "generated independently for every pairwise contrast.</p>",
@@ -791,6 +1156,9 @@ def make_report(
             "analysis_type", "genome", "contrast_id", "background_genes", "foreground_genes",
             "significant_ora_terms", "significant_gsea_terms", "status",
         ) if any(field in row for row in enrichment_rows)]) if enrichment_rows else "<p>Enrichment was disabled or unavailable.</p>",
+        "<h3>Top significant enrichment terms</h3>",
+        _html_table(enrichment_terms, ENRICHMENT_TERM_FIELDS)
+        if enrichment_terms else "<p>No enrichment term passed the configured adjusted-p threshold.</p>",
         _image_gallery(outdir, enrichment_images),
         "<h2 id='apa-b'>APA-B validation and interpretation</h2>",
         f"<p><strong>{html.escape(apa_b_status)}</strong></p>", _html_table(apa_b_rows, ["property", "value"]),
@@ -813,7 +1181,8 @@ def make_report(
         "modification time; small files also receive SHA-256 checksums.</p>", artifact_html,
         "<h2>Report scope</h2><p>This alpha.10 report integrates run status, samples, count-universe definitions, "
         "validated DGE/APA contrast counts, embedded statistical plots, enrichment results, warnings, browser-track "
-        "inventories, and complete provenance. MultiQC remains the detailed sequencing/alignment QC report. "
+        "inventories, RSeQC orientation/distribution/gene-body QC, and complete provenance. MultiQC provides "
+        "the detailed FastQC, alignment, and RSeQC source reports. "
         "APA-B interpretation is explicitly marked unavailable unless its pinned pilot validation passes.</p>",
     ])
     html_target.write_text(
@@ -831,7 +1200,11 @@ def make_report(
         "document.querySelectorAll('#contrast-table tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(v));});}"
         "</script></body></html>\n", encoding="utf-8")
     provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
-    outputs = [markdown, html_target, summary, contrast_summary, *browser, *provenance_outputs]
+    outputs = [
+        markdown, html_target, summary, contrast_summary, dge_summary, apa_summary,
+        dge_events_path, apa_events_path, enrichment_terms_path,
+        *browser, *provenance_outputs,
+    ]
     write_receipt("report", outdir, signature, outputs, ["rna-ends2tracks", "report"])
     event(log_dir, "report", "completed", str(html_target))
     return html_target

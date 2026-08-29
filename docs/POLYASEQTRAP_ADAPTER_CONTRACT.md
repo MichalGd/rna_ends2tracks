@@ -74,7 +74,7 @@ The builder refuses incomplete audits. Human and mouse may be accepted together 
 RUN_APA_B=true
 APA_B_PILOT_ACCEPTED=true
 APA_B_COMMAND_TEMPLATE="auto"
-APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post4/installation_manifest.json"
+APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json"
 APA_B_ENDPOINT_SOURCE="auto"
 APA_B_THREADS=16
 APA_B_ENDPOINT_PARALLEL_JOBS=8

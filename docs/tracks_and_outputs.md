@@ -21,12 +21,17 @@ The report stage automatically inventories and describes every generated BigWig:
 | Output | Purpose |
 |---|---|
 | `10_reports/bigwig_collections.txt` | One textual column: collection header, then one BigWig filename per line |
-| `10_reports/ucsc_track_descriptors/<family>__<normalization>.txt` | One-line UCSC custom-track definitions for one collection |
+| `10_reports/ucsc_track_descriptors/<family>.txt` | All one-line UCSC definitions for a signal family, separated by normalization-group comments |
 | `10_reports/ucsc_track_descriptors/UCSC_bigWig_tracks.oneline.txt` | All collection descriptors in one file, separated by a one-line group description |
-| `10_reports/UCSC_trackDb.txt` | Compatibility combined descriptor file |
+| `10_reports/ucsc_track_descriptors/UCSC_trackDb.txt` | Compatibility copy of the combined one-line descriptor file |
+| `10_reports/ucsc_track_descriptors/UCSC_descriptor_validation.tsv` | Per-file track count and syntax-validation status |
 | `10_reports/IGV_session.xml` | IGV resource list for every generated BigWig |
 
 Each collection receives a distinct RGB color. A transcript-minus descriptor adds `negateValues=on` by default because the corresponding BigWig stores negative values; UCSC then displays its magnitude above zero. Set `UCSC_NEGATE_MINUS_TRACKS=false` to retain the mirrored negative display. `UCSC_VIEW_LIMITS` defaults to `0:12`.
+
+The report validates every non-comment descriptor before publication. Each definition must occupy exactly one physical line, begin with `track`, declare `type=bigWig`, and contain unique short `name`, quoted `description`, valid `bigDataUrl`, numeric `viewLimits`, and valid RGB values. Markdown URLs, broken quoting, duplicate attributes/names, and overlong UCSC labels abort the report instead of producing a file that the browser would reject. Lines beginning with `#` and blank lines separate families/normalizations and are ignored by UCSC.
+
+This contract follows the UCSC Genome Browser documentation for [bigWig custom tracks](https://genome.ucsc.edu/goldenPath/help/bigWig.html) and [custom-track definition lines](https://genome.ucsc.edu/goldenPath/help/customTrackText.html).
 
 For directly usable UCSC URLs, configure a plain public prefix such as:
 

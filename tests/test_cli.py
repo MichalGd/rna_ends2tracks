@@ -1,9 +1,11 @@
 import argparse
+import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from rnaends2tracks.cli import execute
+from rnaends2tracks.cli import _downstream_branch_sequences, _status_observations, execute
 
 HEADER = (
     "sample_id,description,genome,biological_replicate_id,technical_replicate_id,lane_id,"
@@ -13,6 +15,31 @@ HEADER = (
 
 
 class CliTests(unittest.TestCase):
+    def test_downstream_scheduler_pipelines_tracks_after_dge_and_prioritizes_apa_b(self):
+        branches = _downstream_branch_sequences([
+            "gene_expression", "apa_a", "apa_b", "tracks",
+        ])
+        self.assertEqual(branches, [
+            ("apa_b", ("apa_b",)),
+            ("gene_expression_then_tracks", ("gene_expression", "tracks")),
+            ("apa_a", ("apa_a",)),
+        ])
+
+    def test_status_counts_enrichment_jobs_and_completed_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "results"
+            index = results / "10_reports" / "enrichment_summary" / "enrichment_index.tsv"
+            index.parent.mkdir(parents=True)
+            with index.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["analysis_type"], delimiter="\t")
+                writer.writeheader(); writer.writerows([{"analysis_type": "dge"}, {"analysis_type": "apa_a"}])
+            receipt = results / "02_alignment" / "run_receipt.json"
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({"schema_version": 1, "exit_status": 0}), encoding="utf-8")
+            observations = _status_observations(results, {"workflow_status": "completed", "pid": 1})
+            self.assertEqual(observations["outputs"]["enrichment"], 2)
+            self.assertEqual(observations["stage_receipts"]["alignment"], "completed")
+
     def test_complete_portable_dry_run_accepts_missing_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

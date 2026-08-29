@@ -25,6 +25,10 @@ class ProcessExecutionTests(unittest.TestCase):
         rows = resource_plan_rows(DEFAULT_RESOURCES, {"samples": 4})
         exact = next(row for row in rows if row["work_unit"] == "exact_end_extraction")
         self.assertEqual(exact["executor"], "python_process")
+        rseqc = next(row for row in rows if row["stage"] == "rseqc")
+        self.assertEqual(rseqc["work_unit"], "sample_qc")
+        self.assertEqual(rseqc["units"], 4)
+        self.assertEqual(rseqc["executor"], "external_process")
         tracks = [row for row in rows if row["stage"] == "tracks"]
         self.assertEqual({row["work_unit"] for row in tracks}, {"c0_sample", "end_sample"})
         self.assertTrue(all(row["executor"] == "python_process_and_external_process" for row in tracks))
@@ -33,6 +37,12 @@ class ProcessExecutionTests(unittest.TestCase):
             {row["work_unit"] for row in apa_b},
             {"endpoint_preparation", "polyaseqtrap_cluster", "deepip", "contrast"},
         )
+        downstream = next(row for row in rows if row["work_unit"] == "module_overlap")
+        self.assertEqual(downstream["executor"], "thread_coordinator_with_nested_bounded_pools")
+        self.assertEqual(downstream["units"], 3)
+        self.assertEqual(downstream["max_threads"], 8)
+        self.assertEqual(downstream["max_memory_gb"], 32)
+        self.assertEqual(downstream["budget_status"], "PASS")
 
     def test_process_pool_preserves_order_and_records_worker_pids(self):
         with tempfile.TemporaryDirectory() as temporary:
