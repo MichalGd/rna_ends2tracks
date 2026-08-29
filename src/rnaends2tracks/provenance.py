@@ -85,6 +85,7 @@ def _software_versions() -> list[dict[str, str]]:
         "featureCounts": ["featureCounts", "-v"], "Rscript": ["Rscript", "--version"],
         "bedtools": ["bedtools", "--version"], "multiqc": ["multiqc", "--version"],
         "fastqc": ["fastqc", "--version"],
+        "RSeQC": ["geneBody_coverage.py", "--version"],
     }
     rows = [{"tool": "rna-ends2tracks", "path": "", "version": __version__, "status": "PASS"},
             {"tool": "python", "path": os.sys.executable, "version": platform.python_version(), "status": "PASS"}]
@@ -138,7 +139,10 @@ def generate_provenance_dashboard(plan: Any, results: Path, outdir: Path) -> lis
             "sha256": _sha256(path) if path.is_file() else "MISSING",
         })
     for assembly, reference in sorted(plan.references.items()):
-        for key in ("species", "release", "fasta", "gtf", "star_index", "chrom_sizes", "pas_atlas"):
+        for key in (
+            "species", "release", "fasta", "gtf", "star_index", "chrom_sizes",
+            "pas_atlas", "rseqc_bed",
+        ):
             summary_rows.append({"category": f"reference:{assembly}", "key": key, "value": reference.get(key, "")})
         for name, digest in sorted(reference.get("pas_atlas_checksums", {}).items()):
             summary_rows.append({"category": f"reference:{assembly}", "key": f"pas_atlas_sha256:{name}", "value": digest})

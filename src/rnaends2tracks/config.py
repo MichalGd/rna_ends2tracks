@@ -483,6 +483,10 @@ def load_reference(project: dict[str, Any], check_files: bool = True) -> dict[st
         ref["pas_atlas"] = _resolve(str(ref["pas_atlas"]), base)
         if check_files and not Path(ref["pas_atlas"]).exists():
             raise ConfigError(f"PAS atlas does not exist: {ref['pas_atlas']}")
+    if ref.get("rseqc_bed"):
+        ref["rseqc_bed"] = _resolve(str(ref["rseqc_bed"]), base)
+        if check_files and not Path(ref["rseqc_bed"]).is_file():
+            raise ConfigError(f"RSeQC BED12 reference does not exist: {ref['rseqc_bed']}")
     if check_files:
         _validate_reference_assets(ref)
     warnings: list[dict[str, str]] = []

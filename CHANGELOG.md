@@ -4,6 +4,8 @@
 
 ## 0.1.0-alpha.10.post7 - 2026-08-29
 
+- Add receipt-backed, bounded RSeQC orientation, read-distribution, and gene-body coverage QC using an exact annotation-derived BED12 reference; integrate its tables, plot, MultiQC output, and QuantSeq-specific interpretation into the final report.
+- Consolidate all UCSC custom-track descriptors in one report folder with family files and a group-separated combined file; enforce one-line bigWig syntax, URL, quoting, label, RGB, view-limit, and unique-name validation before publication.
 - Overlap the DGE-then-final-tracks, APA-A, and APA-B branches under an aggregate thread/memory preflight ceiling; add separate APA-A and APA-B contrast-pool controls and publish final tracks without waiting for APA-B.
 - Reconcile live status with successful stage receipts and count enrichment jobs from the authoritative enrichment index.
 - Make cleanup safe across patch-release resumes and prior receipt-validated cleanup removals without weakening output-integrity checks.

@@ -72,7 +72,7 @@ class UnifiedLoggingTests(unittest.TestCase):
                 self.assertEqual(show_status(results), 0)
             self.assertIn("Workflow status: completed", output.getvalue())
             self.assertIn(str((results / "rna_ends2tracks.log").resolve()), output.getvalue())
-            self.assertIn("contrasts=1, BAMs=1, BigWigs=1", output.getvalue())
+            self.assertIn("contrasts=1, BAMs=1, RSeQC=0, BigWigs=1", output.getvalue())
             self.assertIn("Workflow PID:", output.getvalue())
 
     def test_status_json_adds_live_observations(self):

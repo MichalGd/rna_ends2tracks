@@ -1,4 +1,5 @@
 import csv
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ from rnaends2tracks.config import RunPlan
 from rnaends2tracks.report import (
     _apa_b_gene_events, _browser_assets, _contrast_summary, _exact_funnel_rows,
     _html_table, _star_qc_rows, _top_apa_events, _top_dge_events,
-    _top_enrichment_terms, _track_collections,
+    _top_enrichment_terms, _track_collections, _validate_ucsc_track_lines,
 )
 
 
@@ -204,7 +205,31 @@ class ScientificReportTests(unittest.TestCase):
             self.assertTrue(all("/all_reads/" not in line and "/active_pas/" not in line for line in track_lines))
             self.assertEqual(sum("negateValues=on" in line for line in track_lines), 2)
             self.assertTrue(all("viewLimits=0:12" in line for line in track_lines))
-            self.assertIn(outdir / "UCSC_trackDb.txt", outputs)
+            descriptor_dir = outdir / "ucsc_track_descriptors"
+            self.assertIn(descriptor_dir / "all_reads.txt", outputs)
+            self.assertIn(descriptor_dir / "active_pas.txt", outputs)
+            self.assertIn(descriptor_dir / "UCSC_trackDb.txt", outputs)
+            self.assertIn(descriptor_dir / "UCSC_descriptor_validation.tsv", outputs)
+            self.assertTrue(all(len(line) == len(line.rstrip("\r\n")) for line in track_lines))
+            self.assertTrue(all(
+                len(next(token for token in shlex.split(line)
+                         if token.startswith("description=")).split("=", 1)[1]) <= 60
+                for line in track_lines
+            ))
+
+    def test_ucsc_validator_rejects_markdown_url_and_multiline_records(self):
+        valid = (
+            'track type=bigWig name="rna_ends_0001" description="valid" '
+            'bigDataUrl=http://example.test/sample.bw visibility=full color=0,102,204 '
+            'viewLimits=0:12'
+        )
+        self.assertEqual(_validate_ucsc_track_lines([valid]), 1)
+        with self.assertRaisesRegex(RuntimeError, "bigDataUrl"):
+            _validate_ucsc_track_lines([valid.replace(
+                "http://example.test/sample.bw", "[http://example.test](http://example.test)/sample.bw",
+            )])
+        with self.assertRaisesRegex(RuntimeError, "not one line"):
+            _validate_ucsc_track_lines([valid + "\ntrack type=bigWig"])
 
     def test_track_collection_counts_strands(self):
         with tempfile.TemporaryDirectory() as temporary:

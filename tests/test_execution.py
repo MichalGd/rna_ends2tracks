@@ -25,6 +25,10 @@ class ProcessExecutionTests(unittest.TestCase):
         rows = resource_plan_rows(DEFAULT_RESOURCES, {"samples": 4})
         exact = next(row for row in rows if row["work_unit"] == "exact_end_extraction")
         self.assertEqual(exact["executor"], "python_process")
+        rseqc = next(row for row in rows if row["stage"] == "rseqc")
+        self.assertEqual(rseqc["work_unit"], "sample_qc")
+        self.assertEqual(rseqc["units"], 4)
+        self.assertEqual(rseqc["executor"], "external_process")
         tracks = [row for row in rows if row["stage"] == "tracks"]
         self.assertEqual({row["work_unit"] for row in tracks}, {"c0_sample", "end_sample"})
         self.assertTrue(all(row["executor"] == "python_process_and_external_process" for row in tracks))

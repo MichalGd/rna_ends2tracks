@@ -33,6 +33,11 @@ DEFAULT_RESOURCES: dict[str, Any] = {
         "merge_parallel_jobs": 1,
         "merge_memory_gb": 8,
     },
+    "rseqc": {
+        "parallel_jobs": 2,
+        "threads": 1,
+        "memory_gb": 4,
+    },
     "dge": {
         "featurecounts_threads": 8,
         "featurecounts_memory_gb": 16,
@@ -118,7 +123,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     for key in ("total_threads", "total_memory_gb", "temporary_directory"):
         if key in supplied:
             resolved[key] = supplied[key]
-    for stage in ("downstream", "preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
+    for stage in ("downstream", "preprocess", "rseqc", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
         stage_value = supplied.get(stage, {})
         if not isinstance(stage_value, dict):
             raise ValueError(f"resources.{stage} must be a YAML mapping")  # noqa: TRY004
@@ -130,7 +135,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     resolved["total_threads"] = _positive_int(resolved["total_threads"], "resources.total_threads")
     resolved["total_memory_gb"] = _positive_int(resolved["total_memory_gb"], "resources.total_memory_gb")
     resolved["temporary_directory"] = str(resolved.get("temporary_directory", "") or "")
-    for stage in ("downstream", "preprocess", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
+    for stage in ("downstream", "preprocess", "rseqc", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
         for key, value in list(resolved[stage].items()):
             resolved[stage][key] = _positive_int(value, f"resources.{stage}.{key}")
 
@@ -161,6 +166,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
 def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None = None) -> list[dict[str, Any]]:
     counts = counts or {}
     pre = resources["preprocess"]
+    rseqc = resources["rseqc"]
     dge = resources["dge"]
     apa_a = resources["apa_a"]
     apa_b = resources["apa_b"]
@@ -175,6 +181,8 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
              pre["samtools_threads"] * pre["samtools_sort_memory_per_thread_gb"])),
         ("preprocess", "sample_merge", "external_process", counts.get("samples", 0), pre["merge_parallel_jobs"],
          pre["samtools_threads"], pre["merge_memory_gb"]),
+        ("rseqc", "sample_qc", "external_process", counts.get("samples", 0), rseqc["parallel_jobs"],
+         rseqc["threads"], rseqc["memory_gb"]),
         ("dge", "featurecounts", "external_process", 1, 1,
          dge["featurecounts_threads"], dge["featurecounts_memory_gb"]),
         ("dge", "contrast", "external_process", counts.get("contrasts", 0), dge["contrast_parallel_jobs"],

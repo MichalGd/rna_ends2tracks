@@ -6,6 +6,8 @@ The validated profile is Lexogen QuantSeq REV V2 single-end Read 1 without UMIs.
 
 STAR maps reads to the assembly selected in each samplesheet row. Human and mouse samples may coexist, but each lane uses its matching reference and every downstream catalog/statistical model remains genome-specific. The workflow audits STAR `ReadsPerGene.out.tab` and expects the reverse-stranded QuantSeq REV profile. Existing STAR indices are accepted after structural validation; `sjdbOverhang` differences generate a review warning because a 150-overhang index can still map shorter 101-nt reads.
 
+After alignment, RSeQC independently evaluates the final C0 BAMs with `infer_experiment.py`, `read_distribution.py`, and `geneBody_coverage.py`. The reference is an assembly-matched BED12 supplied in `config.conf` or deterministically generated from the exact selected GTF. Per-sample work is bounded by `RSEQC_PARALLEL_JOBS`; its summaries, combined gene-body plot, source files, receipt, and dedicated MultiQC report are retained under `01_qc/rseqc`. QuantSeq REV is expected to show strong transcript 3-prime enrichment, so conventional whole-transcript uniformity is not the acceptance criterion. See [RSeQC QC](rseqc.md).
+
 The C0 statistical BAM contains mapped primary `NH=1` alignments. SAM flags 0x4, 0x100 and 0x800 are excluded. Duplicate flags are retained because no UMI establishes molecular identity and real 3′ molecules often share a cleavage coordinate.
 
 ## Exact transcript ends

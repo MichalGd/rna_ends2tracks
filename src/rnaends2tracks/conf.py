@@ -43,6 +43,15 @@ DEFAULTS: dict[str, str] = {
     "ENRICHMENT_PARALLEL_JOBS": "6",
     "RUN_TRACKS": "true",
     "GENERATE_EARLY_C0_TRACKS": "true",
+    "RUN_RSEQC": "true",
+    "RSEQC_INFER_EXPERIMENT": "true",
+    "RSEQC_READ_DISTRIBUTION": "true",
+    "RSEQC_GENE_BODY_COVERAGE": "true",
+    "RSEQC_MULTIQC": "true",
+    "RSEQC_SAMPLE_READS": "200000",
+    "RSEQC_MIN_TRANSCRIPT_LENGTH": "100",
+    "RSEQC_PARALLEL_JOBS": "6",
+    "RSEQC_MEMORY_GB": "4",
     "LIBRARY_PROTOCOL": "quantseq_rev_v2_se",
     "LIBRARY_LAYOUT": "single_end",
     "UMI_PRESENT": "false",
@@ -119,7 +128,9 @@ DEFAULTS: dict[str, str] = {
 REQUIRED = {"PROJECT_ID", "SAMPLESHEET", "OUTPUT_DIR"}
 REFERENCE_KEYS = {
     "HG38_STAR_INDEX", "HG38_FASTA", "HG38_GTF", "HG38_CHROM_SIZES", "HG38_PAS_ATLAS",
+    "HG38_RSEQC_BED",
     "MM39_STAR_INDEX", "MM39_FASTA", "MM39_GTF", "MM39_CHROM_SIZES", "MM39_PAS_ATLAS",
+    "MM39_RSEQC_BED",
 }
 ALLOWED = set(DEFAULTS) | REQUIRED | REFERENCE_KEYS
 
@@ -263,6 +274,12 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         raise ConfError("ENRICHMENT_KEGG=true is not implemented in alpha.10; use GO, Reactome, or Hallmark")
     if not (_bool(values, "ENRICHMENT_ORA") or _bool(values, "ENRICHMENT_GSEA")):
         raise ConfError("At least one of ENRICHMENT_ORA or ENRICHMENT_GSEA must be true")
+    if _bool(values, "RUN_RSEQC") and not any(_bool(values, key) for key in (
+        "RSEQC_INFER_EXPERIMENT", "RSEQC_READ_DISTRIBUTION", "RSEQC_GENE_BODY_COVERAGE",
+    )):
+        raise ConfError("RUN_RSEQC=true requires at least one enabled RSeQC analysis")
+    if _int(values, "RSEQC_MIN_TRANSCRIPT_LENGTH") < 100:
+        raise ConfError("RSEQC_MIN_TRANSCRIPT_LENGTH must be at least 100")
     minimum_geneset = _int(values, "ENRICHMENT_MIN_GENESET_SIZE")
     maximum_geneset = _int(values, "ENRICHMENT_MAX_GENESET_SIZE")
     if minimum_geneset > maximum_geneset:
@@ -307,6 +324,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "gtf": _path(values.get("HG38_GTF", ""), base),
             "chrom_sizes": _path(values.get("HG38_CHROM_SIZES", ""), base),
             "pas_atlas": _path(values.get("HG38_PAS_ATLAS", ""), base),
+            "rseqc_bed": _path(values.get("HG38_RSEQC_BED", ""), base),
         },
         "GRCm39": {
             "species": "mouse", "assembly": "GRCm39", "release": "GENCODE_vM31",
@@ -315,6 +333,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "gtf": _path(values.get("MM39_GTF", ""), base),
             "chrom_sizes": _path(values.get("MM39_CHROM_SIZES", ""), base),
             "pas_atlas": _path(values.get("MM39_PAS_ATLAS", ""), base),
+            "rseqc_bed": _path(values.get("MM39_RSEQC_BED", ""), base),
         },
     }
     project: dict[str, Any] = {
@@ -344,6 +363,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "gene_expression": _bool(values, "RUN_GENE_EXPRESSION"),
             "apa_a": _bool(values, "RUN_APA_A_MCELL2019"),
             "apa_b": _bool(values, "RUN_APA_B"), "tracks": _bool(values, "RUN_TRACKS"),
+            "rseqc": _bool(values, "RUN_RSEQC"),
             "dge_enrichment": _bool(values, "RUN_DGE_ENRICHMENT"),
             "apa_enrichment": _bool(values, "RUN_APA_ENRICHMENT"),
         },
@@ -378,6 +398,15 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "endpoint_source": values["APA_B_ENDPOINT_SOURCE"].lower(),
         },
         "reporting": {"fdr": _float(values, "FDR"), "min_abs_delta_pau": _float(values, "MIN_ABS_DELTA_PAU")},
+        "rseqc": {
+            "enabled": _bool(values, "RUN_RSEQC"),
+            "infer_experiment": _bool(values, "RSEQC_INFER_EXPERIMENT"),
+            "read_distribution": _bool(values, "RSEQC_READ_DISTRIBUTION"),
+            "gene_body_coverage": _bool(values, "RSEQC_GENE_BODY_COVERAGE"),
+            "multiqc": _bool(values, "RSEQC_MULTIQC"),
+            "sample_reads": _int(values, "RSEQC_SAMPLE_READS"),
+            "minimum_transcript_length": _int(values, "RSEQC_MIN_TRANSCRIPT_LENGTH"),
+        },
         "enrichment": {
             "ora": _bool(values, "ENRICHMENT_ORA"), "gsea": _bool(values, "ENRICHMENT_GSEA"),
             "go": _bool(values, "ENRICHMENT_GO"), "reactome": _bool(values, "ENRICHMENT_REACTOME"),
@@ -433,6 +462,11 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
                 "samtools_threads": _int(values, "SAMTOOLS_THREADS"),
                 "samtools_sort_memory_per_thread_gb": _int(values, "SAMTOOLS_SORT_MEMORY_PER_THREAD_GB"),
                 "merge_parallel_jobs": _int(values, "SAMPLE_MERGE_PARALLEL_JOBS"), "merge_memory_gb": 16,
+            },
+            "rseqc": {
+                "parallel_jobs": _int(values, "RSEQC_PARALLEL_JOBS"),
+                "threads": 1,
+                "memory_gb": _int(values, "RSEQC_MEMORY_GB"),
             },
             "dge": {"featurecounts_threads": _int(values, "SAMTOOLS_THREADS"), "featurecounts_memory_gb": 16,
                     "contrast_parallel_jobs": _int(values, "DGE_CONTRAST_PARALLEL_JOBS"), "contrast_threads": 1, "contrast_memory_gb": 16},

@@ -30,10 +30,11 @@ from .locking import run_lock
 from .paths import workflow_asset
 from .preprocess import preprocess
 from .report import make_report
+from .rseqc import rseqc
 from .tracks import make_c0_tracks, make_tracks
 
 STEPS = (
-    "validate", "alignment", "c0_tracks", "exact_ends", "active_pas", "gene_expression",
+    "validate", "alignment", "rseqc", "c0_tracks", "exact_ends", "active_pas", "gene_expression",
     "apa_a", "apa_b", "apa_comparison", "enrichment", "tracks", "report", "cleanup",
 )
 ALIASES = {
@@ -154,6 +155,7 @@ def _receipt_completed(path: Path) -> bool:
 def _observed_stage_receipts(results: Path) -> dict[str, str]:
     locations = {
         "alignment": results / "02_alignment" / "run_receipt.json",
+        "rseqc": results / "01_qc" / "rseqc" / "run_receipt.json",
         "c0_tracks": results / "09_tracks" / ".stage_receipts" / "tracks_c0" / "run_receipt.json",
         "exact_ends": results / "03_exact_ends" / "run_receipt.json",
         "active_pas": results / "04_active_pas" / "run_receipt.json",
@@ -192,6 +194,7 @@ def _status_observations(results: Path, payload: dict[str, object]) -> dict[str,
     outputs = {
         "contrasts": _table_rows(results / "00_metadata" / "contrasts.tsv"),
         "BAMs": final_bams,
+        "RSeQC": _table_rows(results / "01_qc" / "rseqc" / "rseqc_summary.tsv"),
         "BigWigs": len(list((results / "09_tracks").rglob("*.bw"))),
         "DGE": len(list((results / "05_gene_expression").rglob("*.deseq2.tsv"))),
         "APA-A": len(list((results / "06_apa_a_mcell2019").rglob("*.dexseq.tsv"))),
@@ -271,6 +274,7 @@ def execute(args: argparse.Namespace) -> int:
         actions: dict[str, Callable[[], object]] = {
             "validate": lambda: None,
             "alignment": lambda: preprocess(plan, results, args.dry_run, "alignment" in forced),
+            "rseqc": lambda: rseqc(plan, results, args.dry_run, "rseqc" in forced),
             "c0_tracks": lambda: make_c0_tracks(plan, results, args.dry_run, "c0_tracks" in forced),
             "exact_ends": lambda: exact_ends_stage(plan, results, args.dry_run, "exact_ends" in forced),
             "active_pas": lambda: active_pas_stage(plan, results, args.dry_run, "active_pas" in forced),
@@ -290,6 +294,8 @@ def execute(args: argparse.Namespace) -> int:
         processed: set[str] = set()
 
         def disabled_reason(step: str) -> str | None:
+            if step == "rseqc" and not modules.get("rseqc", False):
+                return "RUN_RSEQC=false"
             if step == "c0_tracks" and not (
                 modules.get("tracks", True)
                 and plan.project["tracks"].get("early_c0", True)

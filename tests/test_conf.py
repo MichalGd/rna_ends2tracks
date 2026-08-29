@@ -55,6 +55,23 @@ class ConfTests(unittest.TestCase):
                 "http://example.test/project",
             )
 
+    def test_rseqc_defaults_and_controls_are_explicit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); config = root / "config.conf"
+            base = "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+            config.write_text(base, encoding="utf-8")
+            project, _ = project_from_conf(config)
+            self.assertTrue(project["modules"]["rseqc"])
+            self.assertTrue(project["rseqc"]["gene_body_coverage"])
+            self.assertEqual(project["resources"]["rseqc"]["parallel_jobs"], 6)
+            config.write_text(
+                base + "RUN_RSEQC=true\nRSEQC_INFER_EXPERIMENT=false\n"
+                "RSEQC_READ_DISTRIBUTION=false\nRSEQC_GENE_BODY_COVERAGE=false\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfError, "at least one enabled RSeQC"):
+                project_from_conf(config)
+
     def test_enrichment_controls_and_apa_b_manifest_gate(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); config = root / "config.conf"

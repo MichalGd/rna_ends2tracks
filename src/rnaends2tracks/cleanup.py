@@ -116,6 +116,8 @@ def _require_successful_workflow(plan: RunPlan, root: Path) -> None:
     required = ["02_alignment", "10_reports"]
     modules = plan.project.get("modules", {})
     requirements = workflow_requirements(plan.project)
+    if modules.get("rseqc", False):
+        required.append("01_qc/rseqc")
     if requirements["exact_ends"]:
         required.append("03_exact_ends")
     if requirements["active_pas"]:

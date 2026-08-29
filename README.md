@@ -26,6 +26,7 @@ flowchart TD
     V --> QT[Raw FastQC and BBDuk trimming]
     QT --> STAR[STAR alignment and orientation check]
     STAR --> C0[C0 mapped primary NH=1 alignments]
+    C0 --> RSEQC[RSeQC orientation, feature distribution, gene-body coverage]
     C0 --> C0TRACKS[Early raw and CPM strand-specific C0 tracks]
     C0 --> C1[C1 exact transcript ends]
     C0 --> C1S[C1S end-defining clipped reads: QC]
@@ -132,6 +133,7 @@ Required columns include:
 - `PREPROCESS_PARALLEL_JOBS` for FastQC/BBDuk lane jobs;
 - `STAR_PARALLEL_JOBS × STAR_THREADS` for alignments;
 - `SAMPLE_MERGE_PARALLEL_JOBS`;
+- `RSEQC_PARALLEL_JOBS` for independent per-sample annotation-aware QC;
 - `END_EXTRACTION_PARALLEL_JOBS`;
 - `DGE_CONTRAST_PARALLEL_JOBS`, `APA_A_CONTRAST_PARALLEL_JOBS`, and
   `APA_B_CONTRAST_PARALLEL_JOBS` (the legacy shared APA setting remains a fallback);
@@ -164,7 +166,7 @@ Transcript-plus and transcript-minus BigWigs are separate; minus values are nega
 results/
 ├── rna_ends2tracks.log        chronological stages and job outcomes
 ├── 00_metadata/
-├── 01_qc/
+├── 01_qc/                    FastQC/MultiQC plus RSeQC summaries and plots
 ├── 02_alignment/              C0 BAMs and orientation audit
 ├── 03_exact_ends/             C1, C1S, C2 and C2R
 ├── 04_active_pas/             pooled CPM, PAS catalog, C3 and C4
@@ -180,9 +182,9 @@ results/
 
 `CLEANUP_INTERMEDIATES=true` is the default. Cleanup runs only after all enabled deliverable receipts and the report validate. It removes only an explicit allow-list (trimmed FASTQs, lane/all-alignment BAMs, temporary strand BAMs and bedGraphs), writes `provenance/cleanup/cleanup_manifest.tsv`, and preserves final BAMs, count universes, statistics, BigWigs, reports and provenance.
 
-`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; validated APA-B results; and APA-A/APA-B direction concordance and agreement percentage. Separate `differential_gene_expression_summary.tsv`, `alternative_polyadenylation_summary.tsv`, `top_differential_genes.tsv`, `top_apa_gene_events.tsv`, and `top_enrichment_terms.tsv` files make the major results directly sortable and reusable. The HTML embeds those top-result tables plus PCA, sample-distance, MA, volcano, and enrichment plots; lists validated samples and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC remains the detailed sequencing/alignment QC report. See [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
+`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; validated APA-B results; and APA-A/APA-B direction concordance and agreement percentage. Separate `differential_gene_expression_summary.tsv`, `alternative_polyadenylation_summary.tsv`, `top_differential_genes.tsv`, `top_apa_gene_events.tsv`, and `top_enrichment_terms.tsv` files make the major results directly sortable and reusable. The HTML embeds those top-result tables plus PCA, sample-distance, MA, volcano, enrichment, and RSeQC gene-body coverage plots; lists validated samples and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC includes the underlying RSeQC results. See [RSeQC QC](docs/rseqc.md) and [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
 
-Every report run also creates `10_reports/bigwig_collections.txt`, a one-column list grouped by track folder, and `10_reports/ucsc_track_descriptors/`, containing one descriptor file per collection plus `UCSC_bigWig_tracks.oneline.txt`. Each BigWig uses one valid UCSC custom-track line, collection-specific color, and optional `negateValues=on` for transcript-minus tracks. Set `UCSC_BIGDATA_URL_PREFIX` to the public directory containing a flat copy of the BigWigs; do not use Markdown link syntax in `config.conf`.
+Every report run also creates `10_reports/bigwig_collections.txt`, a one-column list grouped by track folder, and keeps every UCSC descriptor in `10_reports/ucsc_track_descriptors/`. That folder contains one file per signal family, a combined group-separated `UCSC_bigWig_tracks.oneline.txt`, its compatibility copy, and `UCSC_descriptor_validation.tsv`. Every descriptor is exactly one `track type=bigWig ...` line, uses a collection-specific color and optional `negateValues=on` for transcript-minus tracks, and must pass the built-in UCSC syntax contract before report publication. Set `UCSC_BIGDATA_URL_PREFIX` to the public directory containing a flat copy of the BigWigs; do not use Markdown link syntax in `config.conf`.
 
 ## Installation
 
