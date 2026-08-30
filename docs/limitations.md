@@ -10,6 +10,6 @@
 - DEXSeq identifies differential PAS usage, not necessarily a change in total gene output.
 - Intragenic PAS are candidate PCPA/premature termination events. Confirmation needs orthogonal evidence such as nascent transcription, long-read RNA or validated isoform assays.
 - Ambiguous multi-gene PAS are excluded from statistical matrices by default. This is conservative but can reduce sensitivity in overlapping loci.
-- APA-B is an external pilot-gated method. Its results are independent and compared only after both branches complete; it is not a fallback for APA-A.
+- APA-B uses a separately pinned PolyAseqTrap/DeepIP environment and is validation-scope gated. The audited `biolserv` GRCm39 QuantSeq REV single-end scope is accepted; other assemblies or protocols require their own real-data acceptance. Its results are independent and compared only after both branches complete; it is not a fallback for APA-A.
 - Legacy accepted APA-B manifests created before the protocol-list field are interpreted narrowly as QuantSeq REV V2 SE only. They do not authorize PE execution; each PE protocol requires a reviewed real-PE canary.
 - Human GRCh38/GENCODE v42 and mouse GRCm39/GENCODE vM31 are the initial validated profiles. Other assemblies/releases require a new synchronized reference and PAS-atlas profile.
