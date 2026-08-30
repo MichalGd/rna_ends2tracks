@@ -42,9 +42,9 @@ class PreprocessOrderTests(unittest.TestCase):
                 outdir = Path(command[command.index("--outdir") + 1])
                 path = command[-1]
                 (outdir / f"{Path(path).name.removesuffix('.gz').removesuffix('.fastq')}_screen.txt").write_text(
-                    "FastQ Screen report\nGenome\t#Reads_processed\t%Unmapped\t%One_hit_one_library\t"
-                    "%Multiple_hits_one_library\t%One_hit_multiple_libraries\t"
-                    "%Multiple_hits_multiple_libraries\nMouse\t1000\t5\t90\t2\t2\t1\n",
+                    "FastQ Screen report\nGenome\t#Reads_processed\t%Unmapped\t%One_hit_one_genome\t"
+                    "%Multiple_hits_one_genome\t%One_hit_multiple_genomes\t"
+                    "%Multiple_hits_multiple_genomes\nMouse\t1000\t5\t90\t2\t2\t1\n",
                     encoding="utf-8",
                 )
 
