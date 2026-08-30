@@ -790,7 +790,28 @@ def build_conf_plan(config_path: str | Path, check_inputs: bool = True) -> RunPl
                 "warning_code": "STAR_SJDB_OVERHANG_REVIEW",
                 "message": f"{genome}: STAR sjdbOverhang={observed}; maximum read length suggests {expected}",
             })
+    _validate_apa_b_preflight(project, observed_genomes, profile, check_inputs)
     return RunPlan(project, samples, rows, contrasts, references[observed_genomes[0]], references)
+
+
+def _validate_apa_b_preflight(
+    project: dict[str, Any], observed_genomes: list[str], profile: str, check_inputs: bool,
+) -> None:
+    if not project.get("apa_b", {}).get("enabled", False) or not check_inputs:
+        return
+    # Import locally to avoid a module-level cycle: apa_b uses RunPlan and
+    # signature helpers from this module. Normal validation must reject an
+    # assembly/protocol outside the accepted manifest before any FASTQ work.
+    from .apa_b import _validation_manifest
+
+    try:
+        _validation_manifest(
+            Path(project["apa_b"]["validation_manifest"]),
+            observed_genomes,
+            profile,
+        )
+    except RuntimeError as exc:
+        raise ConfigError(f"APA-B preflight failed: {exc}") from exc
 
 
 def write_plan(plan: RunPlan, outdir: str | Path) -> None:

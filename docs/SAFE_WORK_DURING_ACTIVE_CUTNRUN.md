@@ -1,5 +1,10 @@
 # Safe work while two cutnrun2tracks analyses are running
 
+> **Historical installation-planning record (2026-08-25).** The two jobs and
+> deployment constraints described below are no longer the current server
+> state. Use the [server installation guide](server_installation.md) for current
+> administration and the [quick start](01_quick_start.md) for analysis.
+
 ## Current situation and principle
 
 Two `cutnrun2tracks` instances are active. The public repository was inspected at commit `ea89ff2fbca4273adf0d47ac13451fc234470578` on 2026-08-25. Its documented environment is a useful package/reference baseline, but the public repository does not prove which commit, environment prefix or references the two server jobs currently use.

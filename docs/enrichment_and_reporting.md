@@ -88,3 +88,5 @@ APA-B is not inferred from APA-A. It can be interpreted only when all of the fol
 6. UMI processing and coordinate deduplication are both explicitly false.
 
 Otherwise the report says `DISABLED_NOT_VALIDATED` and does not fabricate results. SE and PE are separate validation claims: a paired project requires its exact `quantseq_rev_*_pe` profile in `library_protocols` and a real paired-layout canary in the accepted manifest. When enabled, APA-A and APA-B keep separate catalogs, gene summaries, enrichment results, and PCPA calls. Only the dedicated comparison output reports positional and direction concordance.
+
+This is a scope check, not a statement that APA-B is unfinished. The audited `biolserv` GRCh38/GRCm39 QuantSeq REV V2 single-end deployment satisfies the gate when its combined accepted manifest is configured. Paired-end APA-B does not inherit that acceptance automatically.

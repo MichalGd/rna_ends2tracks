@@ -1,14 +1,61 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rnaends2tracks.conf import ConfError, project_from_conf, read_conf
-from rnaends2tracks.config import ConfigError, build_conf_plan, workflow_requirements
+from rnaends2tracks.config import (
+    ConfigError, _validate_apa_b_preflight, build_conf_plan, workflow_requirements,
+)
 
 HEADER = "sample_id,description,genome,biological_replicate_id,technical_replicate_id,lane_id,fastq_r1,fastq_r2,condition,batch,subject,library_protocol,library_layout,read_length,kit_catalog,umi_present\n"
 
 
 class ConfTests(unittest.TestCase):
+    def test_new_project_template_enables_both_apa_methods(self):
+        template = Path(__file__).resolve().parents[1] / "config" / "config.conf"
+        values = read_conf(template)
+        self.assertEqual(values["RUN_APA_A_MCELL2019"], "true")
+        self.assertEqual(values["RUN_APA_B"], "true")
+        self.assertEqual(values["APA_B_PILOT_ACCEPTED"], "true")
+        self.assertTrue(values["APA_B_VALIDATION_MANIFEST"])
+
+        # A minimal legacy config remains APA-B-off unless it explicitly opts
+        # into the manifest-gated method.
+        with tempfile.TemporaryDirectory() as temporary:
+            legacy = Path(temporary) / "config.conf"
+            legacy.write_text(
+                "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n",
+                encoding="utf-8",
+            )
+            project, _ = project_from_conf(legacy)
+            self.assertTrue(project["modules"]["apa_a"])
+            self.assertFalse(project["modules"]["apa_b"])
+
+    def test_apa_b_scope_is_validated_before_read_processing(self):
+        project = {
+            "apa_b": {
+                "enabled": True,
+                "validation_manifest": "/accepted/manifest.json",
+            },
+        }
+        with patch(
+            "rnaends2tracks.apa_b._validation_manifest",
+            side_effect=RuntimeError("does not cover quantseq_rev_v2_pe"),
+        ):
+            with self.assertRaisesRegex(ConfigError, "APA-B preflight failed"):
+                _validate_apa_b_preflight(
+                    project, ["GRCm39"], "quantseq_rev_v2_pe", check_inputs=True,
+                )
+
+        # Portable metadata tests may explicitly skip filesystem/manifests;
+        # production validation never uses this bypass.
+        with patch("rnaends2tracks.apa_b._validation_manifest") as validator:
+            _validate_apa_b_preflight(
+                project, ["GRCm39"], "quantseq_rev_v2_pe", check_inputs=False,
+            )
+            validator.assert_not_called()
+
     def test_core_stage_requirements_follow_enabled_tracks(self):
         project = {
             "modules": {"gene_expression": False, "apa_a": False, "tracks": True},

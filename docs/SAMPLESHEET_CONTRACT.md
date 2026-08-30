@@ -78,7 +78,7 @@ Technical replication must never be encoded by duplicating a biological sample
 under new `sample_id` values. Doing so would pseudoreplicate the statistical
 analysis.
 
-## Migration to alpha.6
+## Historical migration from alpha.5 to alpha.6
 
 Alpha.6 retains the alpha.5 columns, uses `config.conf` for normal project settings,
 and permits mixed-genome metadata. For an existing sample with one library and one lane, retain its current
@@ -86,5 +86,7 @@ and permits mixed-genome metadata. For an existing sample with one library and o
 `technical_replicate_id` to a stable value such as `T01`, and set `genome` to the
 assembly configured in `config.conf`.
 
-Do not change workflow release within an active project. Finish older projects with
-their versioned launcher and start a new output directory when adopting alpha.6.
+The migration details above are retained for projects created before alpha.6.
+For a new project, copy the current installed templates as shown in the [quick
+start](01_quick_start.md). Do not change workflow release within an active
+project; use a new output directory when adopting a different release.

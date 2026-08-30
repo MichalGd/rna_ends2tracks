@@ -18,7 +18,7 @@ config/
 └── samplesheet.csv
 ```
 
-YAML files from alpha.5 remain only as migration/reference material; normal alpha.6 runs use `config.conf`.
+YAML files from alpha.5 remain only as migration/reference material; current runs use `config.conf`.
 
 ## Data flow
 
@@ -176,7 +176,7 @@ results/
 ├── 04_active_pas/             pooled CPM, PAS catalog, C3 and C4
 ├── 05_gene_expression/        C4 DESeq2 and C5 diagnostics
 ├── 06_apa_a_mcell2019/        DEXSeq, shifts and differential PCPA
-├── 07_apa_b/                  optional pilot-gated independent method
+├── 07_apa_b/                  validated-scope independent APA method
 ├── 08_apa_comparison/         optional independent-catalog concordance
 ├── 09_tracks/
 ├── 10_reports/
@@ -195,11 +195,17 @@ Every report run also creates `10_reports/bigwig_collections.txt`, a one-column 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11.post2
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11.post3
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).
 
+## Documentation
+
+Start with the [shared-server quick start](docs/01_quick_start.md), [workflow steps](docs/02_workflow_steps.md), and [configuration guide](docs/03_configuration_guide.md). The [documentation index](docs/README.md) separates current run guides, scientific method/QC pages, administrator references and historical alpha records.
+
 ## APA-B status
 
-APA-B now has a repository-owned, pinned PolyAseqTrap/DeepIP QuantSeq REV adapter and one-command separate-environment installer. It clusters genome-wide transcript 3′ endpoints with PolyAseqTrap and applies the official species-specific DeepIP model, so internal-exonic and intronic candidate PCPA sites are eligible even far from an annotated gene end. It remains disabled until the shared installation passes synthetic and real QuantSeq canaries. Enabling it then requires `APA_B_PILOT_ACCEPTED=true` and a schema-v1 `APA_B_VALIDATION_MANIFEST` whose engine/model/environment identities match run provenance. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output. See [APA-B and comparison](docs/11_apa_b_and_comparison.md) and the [pilot contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md).
+APA-B has a repository-owned, pinned PolyAseqTrap/DeepIP QuantSeq REV adapter and a separate immutable environment. It clusters genome-wide transcript 3′ endpoints with PolyAseqTrap and applies the official species-specific DeepIP model, so internal-exonic and intronic candidate PCPA sites are eligible even far from an annotated gene end.
+
+APA-B is implemented, but it is **validation-scope gated**, not universally authorized. New projects created from the audited `biolserv` template run both APA-A and APA-B by default because the GRCh38 and GRCm39 QuantSeq REV V2 single-end deployments have passed their synthetic and real-data pilots and the template selects their combined accepted manifest. Set either method's `RUN_*` switch to `false` to disable it. Paired-end APA-B requires its own matching accepted real-data validation and otherwise fails safely during configuration validation; it does not inherit the single-end acceptance. No project user activates the APA-B environment manually. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output. See [APA-B and comparison](docs/11_apa_b_and_comparison.md) and the [pilot contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md).
