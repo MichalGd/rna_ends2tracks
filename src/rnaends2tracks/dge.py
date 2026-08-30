@@ -111,9 +111,11 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
         factor_path = results / "04_active_pas" / genome / "C4_track_size_factors.tsv"
         index_path = primary / "result_index.tsv"
         resource = plan.project["resources"]["dge"]
+        paired_args = ["-p", "--countReadPairs"] if samples[0].get("library_layout") == "PE" else []
         run([
             "featureCounts", "-T", str(resource["featurecounts_threads"]), "-a", reference["gtf"],
-            "-o", str(c5), "-t", "exon", "-g", "gene_id", "-s", "2", "--primary", *map(str, bams),
+            "-o", str(c5), "-t", "exon", "-g", "gene_id", "-s", "2", "--primary",
+            *paired_args, *map(str, bams),
         ], log_dir / "gene_expression" / genome / "featureCounts.log", dry_run)
         common = [
             "--counts", str(c4), "--samples", str(results / "00_metadata" / "validated_samples.tsv"),

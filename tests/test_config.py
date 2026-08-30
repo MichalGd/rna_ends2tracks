@@ -28,6 +28,31 @@ def sample(sample_id, condition, batch, subject=""):
 
 
 class ContractTests(unittest.TestCase):
+    def test_paired_end_samplesheet_requires_r2_and_matching_protocol(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sheet = root / "samples.csv"
+            row = sample("S1", "A", "B1")
+            row.update({
+                "lane_id": "L001", "fastq_r1": "S1_R1.fastq.gz", "fastq_r2": "S1_R2.fastq.gz",
+                "library_layout": "PE", "library_protocol": "quantseq_rev_v2_pe",
+            })
+            with sheet.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(REQUIRED_COLUMNS)); writer.writeheader(); writer.writerow(row)
+            rows = load_samplesheet(sheet, check_fastqs=False)
+            self.assertEqual(rows[0]["library_layout"], "PE")
+            self.assertTrue(rows[0]["fastq_r2"].endswith("S1_R2.fastq.gz"))
+            row["fastq_r2"] = ""
+            with sheet.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(REQUIRED_COLUMNS)); writer.writeheader(); writer.writerow(row)
+            with self.assertRaisesRegex(ConfigError, "fastq_r2 is required"):
+                load_samplesheet(sheet, check_fastqs=False)
+            row["fastq_r2"] = "S1_R2.fastq.gz"; row["library_protocol"] = "quantseq_rev_v2_se"
+            with sheet.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(REQUIRED_COLUMNS)); writer.writeheader(); writer.writerow(row)
+            with self.assertRaisesRegex(ConfigError, "protocol/layout mismatch"):
+                load_samplesheet(sheet, check_fastqs=False)
+
     def test_repository_example_resolves_complete_pairs(self):
         root = Path(__file__).resolve().parents[1]
         plan = build_plan(

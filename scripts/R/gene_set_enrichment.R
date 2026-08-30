@@ -16,13 +16,16 @@ if ("--self-test" %in% args) {
     if (!is.null(subcollection)) {
       if ("subcollection" %in% formal_names) call$subcollection <- subcollection else call$subcategory <- subcollection
     }
-    suppressWarnings(do.call(msigdbr::msigdbr, call))
+    tryCatch(suppressWarnings(do.call(msigdbr::msigdbr, call)), error=function(e) data.frame())
   }
   hallmark_human <- fetch("Homo sapiens", "H")
   hallmark_mouse <- fetch("Mus musculus", "H")
   go_bp <- fetch("Homo sapiens", "C5", "GO:BP")
   reactome <- fetch("Homo sapiens", "C2", "CP:REACTOME")
-  stopifnot(nrow(hallmark_human) > 0, nrow(hallmark_mouse) > 0, nrow(go_bp) > 0, nrow(reactome) > 0)
+  kegg_medicus <- fetch("Homo sapiens", "C2", "CP:KEGG_MEDICUS")
+  kegg_legacy <- fetch("Homo sapiens", "C2", "CP:KEGG_LEGACY")
+  stopifnot(nrow(hallmark_human) > 0, nrow(hallmark_mouse) > 0, nrow(go_bp) > 0,
+            nrow(reactome) > 0, nrow(kegg_medicus) + nrow(kegg_legacy) > 0)
   gene_column <- if ("ensembl_gene" %in% colnames(hallmark_human)) "ensembl_gene" else "db_ensembl_gene"
   pathways <- split(hallmark_human[[gene_column]], hallmark_human$gs_id)
   gene_ids <- unique(unlist(pathways)); gene_ids <- gene_ids[nzchar(gene_ids)]
@@ -48,6 +51,10 @@ run_gsea <- as_flag(get_arg("--gsea", "true"))
 use_go <- as_flag(get_arg("--go", "true"))
 use_reactome <- as_flag(get_arg("--reactome", "true"))
 use_hallmarks <- as_flag(get_arg("--hallmarks", "true"))
+use_kegg <- as_flag(get_arg("--kegg", "true"))
+rich_plots <- as_flag(get_arg("--rich-plots", "true"))
+network_max_terms <- as.integer(get_arg("--network-max-terms", "8"))
+network_max_genes <- as.integer(get_arg("--network-max-genes", "50"))
 padj_threshold <- as.numeric(get_arg("--padj", "0.05"))
 min_size <- as.integer(get_arg("--min-size", "10"))
 max_size <- as.integer(get_arg("--max-size", "500"))
@@ -68,7 +75,10 @@ msig_call <- function(collection, subcollection=NULL, database) {
   if (!is.null(subcollection)) {
     if ("subcollection" %in% formal_names) call$subcollection <- subcollection else call$subcategory <- subcollection
   }
-  frame <- suppressWarnings(do.call(msigdbr::msigdbr, call))
+  frame <- tryCatch(
+    suppressWarnings(do.call(msigdbr::msigdbr, call)),
+    error=function(e) data.frame()
+  )
   if (!nrow(frame)) return(data.frame())
   gene_column <- if ("ensembl_gene" %in% colnames(frame)) "ensembl_gene" else "db_ensembl_gene"
   data.frame(
@@ -87,6 +97,16 @@ if (use_go) {
 }
 if (use_reactome) sets[[length(sets) + 1]] <- msig_call("C2", "CP:REACTOME", "REACTOME")
 if (use_hallmarks) sets[[length(sets) + 1]] <- msig_call("H", NULL, "HALLMARK")
+if (use_kegg) {
+  kegg_sets <- list(
+    msig_call("C2", "CP:KEGG_MEDICUS", "KEGG_MEDICUS"),
+    msig_call("C2", "CP:KEGG_LEGACY", "KEGG_LEGACY")
+  )
+  if (!any(vapply(kegg_sets, nrow, integer(1)) > 0)) {
+    stop("KEGG enrichment was requested, but the installed MSigDB snapshot exposes no KEGG collection")
+  }
+  sets <- c(sets, kegg_sets)
+}
 sets <- sets[vapply(sets, nrow, integer(1)) > 0]
 term2gene <- if (length(sets)) unique(do.call(rbind, sets)) else data.frame(
   database=character(), term_id=character(), term_name=character(), gene_id=character(), db_version=character()
@@ -199,13 +219,115 @@ if (nrow(plot_rows)) {
 ggsave(file.path(outdir, "enrichment.pdf"), enrichment_plot, width=9, height=7)
 ggsave(file.path(outdir, "enrichment.png"), enrichment_plot, width=9, height=7, dpi=150)
 
+plot_index_columns <- c("method", "query", "database", "plot_type", "terms", "pdf", "png", "status")
+plot_index_rows <- list()
+plot_dir <- file.path(outdir, "plots")
+dir.create(plot_dir, recursive=TRUE, showWarnings=FALSE)
+safe_name <- function(value) {
+  value <- gsub("[^A-Za-z0-9_.-]+", "_", value)
+  sub("^_+|_+$", "", value)
+}
+save_rich_plot <- function(plot, method, query, database, plot_type, terms, width=10, height=7) {
+  stem <- safe_name(paste(method, query, database, plot_type, sep="."))
+  pdf <- file.path(plot_dir, paste0(stem, ".pdf"))
+  png <- file.path(plot_dir, paste0(stem, ".png"))
+  ggsave(pdf, plot, width=width, height=height)
+  ggsave(png, plot, width=width, height=height, dpi=150)
+  plot_index_rows[[length(plot_index_rows) + 1]] <<- data.frame(
+    method=method, query=query, database=database, plot_type=plot_type,
+    terms=terms, pdf=pdf, png=png, status="PASS", stringsAsFactors=FALSE
+  )
+}
+term_factor <- function(frame) factor(frame$term_name, levels=rev(unique(frame$term_name)))
+concept_plot <- function(frame, genes_column, title) {
+  frame <- head(frame, network_max_terms)
+  edges <- do.call(rbind, lapply(seq_len(nrow(frame)), function(index) {
+    genes_here <- strsplit(as.character(frame[[genes_column]][index]), ";", fixed=TRUE)[[1]]
+    genes_here <- genes_here[nzchar(genes_here)]
+    if (!length(genes_here)) return(NULL)
+    data.frame(term=frame$term_name[index], gene=genes_here, stringsAsFactors=FALSE)
+  }))
+  if (is.null(edges) || !nrow(edges)) return(NULL)
+  ranked_genes <- names(sort(table(edges$gene), decreasing=TRUE))
+  retained <- head(ranked_genes, network_max_genes)
+  edges <- edges[edges$gene %in% retained, , drop=FALSE]
+  if (!nrow(edges)) return(NULL)
+  terms <- unique(edges$term); genes_here <- unique(edges$gene)
+  term_y <- setNames(seq_along(terms), terms)
+  gene_y <- setNames(seq(1, max(1, length(terms)), length.out=length(genes_here)), genes_here)
+  edge_frame <- data.frame(x=0, xend=1, y=unname(gene_y[edges$gene]),
+                           yend=unname(term_y[edges$term]))
+  nodes <- rbind(
+    data.frame(x=0, y=unname(gene_y), label=names(gene_y), type="gene"),
+    data.frame(x=1, y=unname(term_y), label=names(term_y), type="term")
+  )
+  ggplot() + geom_segment(data=edge_frame, aes(x=x, y=y, xend=xend, yend=yend),
+                          color="grey75", linewidth=0.25) +
+    geom_point(data=nodes, aes(x=x, y=y, color=type), size=2.2) +
+    geom_text(data=nodes, aes(x=x, y=y, label=label, hjust=ifelse(type == "gene", 1.05, -0.05)),
+              size=2.5) + scale_x_continuous(limits=c(-0.35, 1.35), breaks=c(0, 1),
+              labels=c("Genes", "Gene sets")) + labs(title=title, color=NULL, x=NULL, y=NULL) +
+    theme_void() + theme(legend.position="bottom", plot.title=element_text(hjust=0.5))
+}
+
+if (rich_plots && nrow(ora)) {
+  significant <- ora[!is.na(ora$padj) & ora$padj <= padj_threshold & ora$overlap_count > 0, , drop=FALSE]
+  groups <- split(significant, interaction(significant$query, significant$database, drop=TRUE))
+  for (frame in groups) {
+    frame <- frame[order(frame$padj, -frame$overlap_count), , drop=FALSE]
+    frame <- head(frame, 20)
+    if (!nrow(frame)) next
+    frame$term_plot <- term_factor(frame)
+    frame$gene_ratio <- frame$overlap_count / pmax(frame$foreground_size, 1)
+    title <- paste("ORA", frame$query[1], frame$database[1], contrast_id, sep=" | ")
+    dot <- ggplot(frame, aes(gene_ratio, term_plot, size=overlap_count, color=-log10(pmax(padj, .Machine$double.xmin)))) +
+      geom_point() + scale_color_viridis_c() + theme_bw() +
+      labs(title=title, x="Gene ratio", y=NULL, color="-log10(FDR)", size="Overlap")
+    bar <- ggplot(frame, aes(-log10(pmax(padj, .Machine$double.xmin)), term_plot, fill=gene_ratio)) +
+      geom_col() + scale_fill_viridis_c() + theme_bw() +
+      labs(title=title, x="-log10(FDR)", y=NULL, fill="Gene ratio")
+    save_rich_plot(dot, "ORA", frame$query[1], frame$database[1], "dotplot", nrow(frame))
+    save_rich_plot(bar, "ORA", frame$query[1], frame$database[1], "barplot", nrow(frame))
+    network <- concept_plot(frame, "genes", paste(title, "concept network"))
+    if (!is.null(network)) save_rich_plot(network, "ORA", frame$query[1], frame$database[1],
+                                          "concept_network", min(nrow(frame), network_max_terms), 12, 8)
+  }
+}
+if (rich_plots && nrow(gsea)) {
+  significant <- gsea[!is.na(gsea$padj) & gsea$padj <= padj_threshold, , drop=FALSE]
+  groups <- split(significant, significant$database, drop=TRUE)
+  for (frame in groups) {
+    frame <- frame[order(frame$padj, -abs(frame$NES)), , drop=FALSE]
+    frame <- head(frame, 20)
+    if (!nrow(frame)) next
+    frame$term_plot <- term_factor(frame)
+    title <- paste("GSEA", frame$database[1], contrast_id, sep=" | ")
+    dot <- ggplot(frame, aes(NES, term_plot, size=set_size, color=-log10(pmax(padj, .Machine$double.xmin)))) +
+      geom_point() + scale_color_viridis_c() + theme_bw() +
+      labs(title=title, x="Normalized enrichment score", y=NULL, color="-log10(FDR)", size="Set size")
+    bar <- ggplot(frame, aes(NES, term_plot, fill=NES > 0)) + geom_col() + theme_bw() +
+      scale_fill_manual(values=c("TRUE"="#B2182B", "FALSE"="#2166AC")) +
+      labs(title=title, x="Normalized enrichment score", y=NULL, fill="Positive NES")
+    save_rich_plot(dot, "GSEA", "ranked", frame$database[1], "dotplot", nrow(frame))
+    save_rich_plot(bar, "GSEA", "ranked", frame$database[1], "barplot", nrow(frame))
+    network <- concept_plot(frame, "leading_edge", paste(title, "concept network"))
+    if (!is.null(network)) save_rich_plot(network, "GSEA", "ranked", frame$database[1],
+                                          "concept_network", min(nrow(frame), network_max_terms), 12, 8)
+  }
+}
+plot_index <- if (length(plot_index_rows)) do.call(rbind, plot_index_rows) else
+  as.data.frame(setNames(replicate(length(plot_index_columns), character(0), simplify=FALSE), plot_index_columns))
+write.table(plot_index, file.path(outdir, "plot_index.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
 versions <- unique(na.omit(term2gene$db_version))
 provenance <- data.frame(
   key=c("analysis_type", "contrast_id", "genome", "species", "msigdbr", "fgsea", "ggplot2",
-        "msigdb_versions", "msigdb_source_species", "ora", "gsea", "padj", "min_size", "max_size"),
+        "msigdb_versions", "msigdb_source_species", "ora", "gsea", "go", "reactome", "hallmarks",
+        "kegg", "rich_plots", "rich_plot_count", "padj", "min_size", "max_size"),
   value=c(analysis_type, contrast_id, genome, species, as.character(packageVersion("msigdbr")),
           as.character(packageVersion("fgsea")), as.character(packageVersion("ggplot2")),
           paste(versions, collapse=","), "Homo sapiens; mouse uses msigdbr ortholog mapping",
-          run_ora, run_gsea, padj_threshold, min_size, max_size), stringsAsFactors=FALSE
+          run_ora, run_gsea, use_go, use_reactome, use_hallmarks, use_kegg, rich_plots,
+          nrow(plot_index), padj_threshold, min_size, max_size), stringsAsFactors=FALSE
 )
 write.table(provenance, file.path(outdir, "provenance.tsv"), sep="\t", quote=FALSE, row.names=FALSE)

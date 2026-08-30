@@ -25,7 +25,7 @@ def _accepted_synthetic(path: Path) -> None:
         raise RuntimeError("Synthetic APA-B pilot has not passed: " + ", ".join(failures))
 
 
-def _accepted_real_canary(assembly: str, directory: Path) -> None:
+def _accepted_real_canary(assembly: str, directory: Path) -> dict[str, object]:
     required = ["pas_catalog.tsv", "pas_counts.tsv", "deepip_audit.tsv", "engine_provenance.json", "adapter_audit.json"]
     missing = [name for name in required if not (directory / name).is_file()]
     if missing:
@@ -39,20 +39,30 @@ def _accepted_real_canary(assembly: str, directory: Path) -> None:
     provenance = _load_json(directory / "engine_provenance.json", f"{assembly} engine provenance")
     if provenance.get("assembly") != assembly or provenance.get("coordinate_deduplication") is not False:
         raise RuntimeError(f"{assembly} real canary provenance violates the adapter contract")
+    return provenance
 
 
 def execute(args: argparse.Namespace) -> int:
     installation = _load_json(Path(args.installation_manifest), "APA-B installation manifest")
     _accepted_synthetic(Path(args.synthetic_audit))
     canaries: dict[str, str] = {}
+    canary_layouts: set[str] = set()
     for specification in args.real_canary:
         assembly, separator, directory = specification.partition("=")
         if not separator or assembly not in {"GRCh38", "GRCm39"}:
             raise RuntimeError("--real-canary must use GRCh38=/path or GRCm39=/path")
-        _accepted_real_canary(assembly, Path(directory))
+        provenance = _accepted_real_canary(assembly, Path(directory))
+        canary_layouts.update(map(str, provenance.get("library_layouts", ["SE"])))
         canaries[assembly] = "PASS"
     if not canaries:
         raise RuntimeError("At least one real QuantSeq REV canary is required")
+    protocols = args.library_protocol or ["quantseq_rev_v2_se"]
+    for protocol in protocols:
+        layout = "PE" if protocol.endswith("_pe") else "SE"
+        if layout not in canary_layouts:
+            raise RuntimeError(
+                f"APA-B acceptance for {protocol} requires a real {layout} QuantSeq REV canary"
+            )
     payload = {
         "schema_version": 1,
         "status": "accepted",
@@ -65,7 +75,7 @@ def execute(args: argparse.Namespace) -> int:
         "model": {"name": "DeepIP", "sha256": next(iter(installation["models"].values()))["sha256"]},
         "environment": {"sha256": installation["environment"]["sha256"]},
         "assemblies": sorted(canaries),
-        "library_protocols": ["quantseq_rev_v2_se"],
+        "library_protocols": sorted(set(protocols)),
         "umi_present": False,
         "coordinate_deduplication": False,
         "quantseq_rev_adaptation": "genomewide_no_tail_weighted_PAC",
@@ -88,6 +98,11 @@ def main() -> None:
     parser.add_argument("--installation-manifest", required=True)
     parser.add_argument("--synthetic-audit", required=True)
     parser.add_argument("--real-canary", action="append", default=[])
+    parser.add_argument(
+        "--library-protocol", action="append",
+        choices=["quantseq_rev_v1_se", "quantseq_rev_v2_se", "quantseq_rev_v1_pe", "quantseq_rev_v2_pe"],
+        help="Accepted protocol; repeat for multiple validated layouts (default: quantseq_rev_v2_se)",
+    )
     parser.add_argument("--reviewed-by", required=True)
     parser.add_argument("--output", required=True)
     raise SystemExit(execute(parser.parse_args()))

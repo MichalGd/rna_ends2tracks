@@ -48,8 +48,12 @@ GENOME_ALIASES = {
     "grcm39": "GRCm39",
     "mm39": "GRCm39",
 }
-SUPPORTED_PROTOCOLS = {"quantseq_rev_v2_se", "quantseq_rev_v1_se"}
-PROTOCOL_ALIASES = {"quantseq_rev_v2": "quantseq_rev_v2_se", "quantseq_rev_v1": "quantseq_rev_v1_se"}
+SUPPORTED_PROTOCOLS = {
+    "quantseq_rev_v2_se", "quantseq_rev_v1_se",
+    "quantseq_rev_v2_pe", "quantseq_rev_v1_pe",
+}
+GENERIC_PROTOCOLS = {"quantseq_rev_v2", "quantseq_rev_v1"}
+LAYOUT_ALIASES = {"SE": "SE", "SINGLE_END": "SE", "PE": "PE", "PAIRED_END": "PE"}
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SAFE_DESIGN_TERM = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
 
@@ -106,15 +110,20 @@ def sample_universe(plan: RunPlan) -> list[dict[str, Any]]:
         for row in plan.sample_rows:
             if row["sample_id"] != sample["sample_id"]:
                 continue
-            path = Path(row["fastq_r1"])
-            try:
-                stat = path.stat()
-                size, modified = stat.st_size, stat.st_mtime_ns
-            except OSError:
-                size, modified = None, None
+            files: dict[str, dict[str, Any] | None] = {}
+            for mate in ("fastq_r1", "fastq_r2"):
+                if not row.get(mate):
+                    files[mate] = None
+                    continue
+                path = Path(row[mate])
+                try:
+                    stat = path.stat()
+                    size, modified = stat.st_size, stat.st_mtime_ns
+                except OSError:
+                    size, modified = None, None
+                files[mate] = {"path": str(path.resolve()), "size": size, "mtime_ns": modified}
             lanes.append({"technical_replicate_id": row["technical_replicate_id"],
-                          "lane_id": row["lane_id"], "fastq_r1": str(path.resolve()),
-                          "size": size, "mtime_ns": modified})
+                          "lane_id": row["lane_id"], **files})
         universe.append({"sample_id": sample["sample_id"], "genome": sample["genome"], "lanes": lanes})
     return universe
 
@@ -146,6 +155,44 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _normalize_layout(value: str, line_number: int | None = None) -> str:
+    layout = LAYOUT_ALIASES.get(value.strip().upper())
+    if layout is None:
+        location = f" on samplesheet line {line_number}" if line_number is not None else ""
+        raise ConfigError(f"Unsupported library_layout{location}: {value!r}; use SE or PE")
+    return layout
+
+
+def _normalize_protocol(value: str, layout: str, line_number: int | None = None) -> str:
+    protocol = value.strip().lower()
+    if protocol in GENERIC_PROTOCOLS:
+        protocol = f"{protocol}_{layout.lower()}"
+    location = f" on samplesheet line {line_number}" if line_number is not None else ""
+    if protocol not in SUPPORTED_PROTOCOLS:
+        raise ConfigError(f"Unsupported or unvalidated library_protocol{location}: {protocol}")
+    if not protocol.endswith(f"_{layout.lower()}"):
+        raise ConfigError(
+            f"library_protocol/layout mismatch{location}: {protocol} cannot be used with {layout}"
+        )
+    return protocol
+
+
+def _validate_fastq(path: str, label: str, line_number: int, check_fastqs: bool) -> None:
+    if not path.endswith((".fastq.gz", ".fq.gz")):
+        raise ConfigError(f"{label} must be gzip-compressed on line {line_number}: {path}")
+    if check_fastqs and not Path(path).is_file():
+        raise ConfigError(f"{label} does not exist: {path}")
+    if not check_fastqs:
+        return
+    try:
+        with gzip.open(path, "rt", encoding="ascii", errors="replace") as fastq:
+            first = fastq.readline(); fastq.readline(); third = fastq.readline()
+        if not first.startswith("@") or not third.startswith("+"):
+            raise ConfigError(f"Invalid FASTQ structure: {path}")
+    except (OSError, EOFError) as exc:
+        raise ConfigError(f"Cannot read gzip FASTQ: {path}: {exc}") from exc
 
 
 def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[str, str]]:
@@ -194,14 +241,8 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
         seen_lanes.add(lane_key)
         if row["umi_present"].lower() not in {"false", "no", "0"}:
             raise ConfigError(f"UMIs are unsupported; umi_present must be false (line {line_number})")
-        layout = row["library_layout"].upper()
-        protocol = PROTOCOL_ALIASES.get(row["library_protocol"].lower(), row["library_protocol"].lower())
-        if layout != "SE":
-            raise ConfigError(
-                f"Only validated QuantSeq REV single-end profiles are enabled; got {layout} on line {line_number}"
-            )
-        if protocol not in SUPPORTED_PROTOCOLS:
-            raise ConfigError(f"Unsupported or unvalidated library_protocol on line {line_number}: {protocol}")
+        layout = _normalize_layout(row["library_layout"], line_number)
+        protocol = _normalize_protocol(row["library_protocol"], layout, line_number)
         try:
             if int(row["read_length"]) < 20:
                 raise ValueError
@@ -211,26 +252,22 @@ def load_samplesheet(path: str | Path, check_fastqs: bool = True) -> list[dict[s
         row["library_protocol"] = protocol
         row["fastq_r1"] = _resolve(row["fastq_r1"], base)
         row["fastq_r2"] = _resolve(row["fastq_r2"], base)
-        prior_fastq = seen_fastqs.setdefault(row["fastq_r1"], lane_key)
-        if prior_fastq != lane_key:
-            raise ConfigError(
-                f"FASTQ R1 is assigned to more than one lane row: {row['fastq_r1']} "
-                f"({prior_fastq} and {lane_key})"
-            )
-        if not row["fastq_r1"].endswith((".fastq.gz", ".fq.gz")):
-            raise ConfigError(f"FASTQ R1 must be gzip-compressed on line {line_number}: {row['fastq_r1']}")
-        if row["fastq_r2"]:
-            raise ConfigError(f"fastq_r2 must be empty for the enabled SE profiles (line {line_number})")
-        if check_fastqs and not Path(row["fastq_r1"]).is_file():
-            raise ConfigError(f"FASTQ R1 does not exist: {row['fastq_r1']}")
-        if check_fastqs:
-            try:
-                with gzip.open(row["fastq_r1"], "rt", encoding="ascii", errors="replace") as fastq:
-                    first = fastq.readline(); fastq.readline(); third = fastq.readline()
-                if not first.startswith("@") or not third.startswith("+"):
-                    raise ConfigError(f"Invalid FASTQ structure: {row['fastq_r1']}")
-            except (OSError, EOFError) as exc:
-                raise ConfigError(f"Cannot read gzip FASTQ: {row['fastq_r1']}: {exc}") from exc
+        if layout == "PE" and not row["fastq_r2"]:
+            raise ConfigError(f"fastq_r2 is required for PE libraries (line {line_number})")
+        if layout == "SE" and row["fastq_r2"]:
+            raise ConfigError(f"fastq_r2 must be empty for SE libraries (line {line_number})")
+        for key, label in (("fastq_r1", "FASTQ R1"), ("fastq_r2", "FASTQ R2")):
+            if not row[key]:
+                continue
+            prior_fastq = seen_fastqs.setdefault(row[key], lane_key)
+            if prior_fastq != lane_key:
+                raise ConfigError(
+                    f"{label} is assigned to more than one lane row: {row[key]} "
+                    f"({prior_fastq} and {lane_key})"
+                )
+            _validate_fastq(row[key], label, line_number, check_fastqs)
+        if row["fastq_r2"] and row["fastq_r1"] == row["fastq_r2"]:
+            raise ConfigError(f"fastq_r1 and fastq_r2 must be distinct (line {line_number})")
 
         lane_specific = {"technical_replicate_id", "lane_id", "fastq_r1", "fastq_r2"}
         invariant_keys = tuple(sorted(key for key in row if key and key not in lane_specific))
@@ -612,15 +649,19 @@ def build_plan(config_path: str | Path, samplesheet_path: str | Path, check_inpu
         raise ConfigError("protocol.has_umi must be false")
     if project.get("protocol", {}).get("retain_duplicate_flagged_reads") is not True:
         raise ConfigError("protocol.retain_duplicate_flagged_reads must be true for no-UMI QuantSeq")
-    profile = str(project.get("protocol", {}).get("profile", "")).lower()
-    if profile not in SUPPORTED_PROTOCOLS:
-        raise ConfigError(f"Unsupported or unvalidated protocol profile: {profile}")
+    configured_layout = _normalize_layout(str(project.get("protocol", {}).get("library_layout", "SE")))
+    profile = _normalize_protocol(str(project.get("protocol", {}).get("profile", "")), configured_layout)
+    project["protocol"]["profile"] = profile
+    project["protocol"]["library_layout"] = configured_layout
+    project["protocol"]["end_defining_mate"] = "R1"
     design = str(project.get("design", "~ condition"))
     if "condition" not in design:
         raise ConfigError("The model design must include condition")
     rows = load_samplesheet(samplesheet_path, check_fastqs=check_inputs)
     if {row["library_protocol"] for row in rows} != {profile}:
         raise ConfigError("Samplesheet library_protocol does not match project protocol.profile")
+    if {row["library_layout"] for row in rows} != {configured_layout}:
+        raise ConfigError("Samplesheet library_layout does not match project protocol.library_layout")
     samples = collapse_samples(rows)
     project["design"] = design
     replicate_owner: dict[str, str] = {}
@@ -668,14 +709,18 @@ def build_conf_plan(config_path: str | Path, check_inputs: bool = True) -> RunPl
         raise ConfigError(str(exc)) from exc
     project["_warnings"] = resource_warnings
     rows = load_samplesheet(samplesheet_path, check_fastqs=check_inputs)
-    profile = PROTOCOL_ALIASES.get(
-        str(project["protocol"]["profile"]).lower(), str(project["protocol"]["profile"]).lower()
-    )
+    configured_layout = _normalize_layout(str(project["protocol"].get("library_layout", "SE")))
+    profile = _normalize_protocol(str(project["protocol"]["profile"]), configured_layout)
     project["protocol"]["profile"] = profile
-    if profile not in SUPPORTED_PROTOCOLS:
-        raise ConfigError(f"Unsupported LIBRARY_PROTOCOL: {profile}")
+    project["protocol"]["library_layout"] = configured_layout
+    project["protocol"]["end_defining_mate"] = "R1"
     if {row["library_protocol"] for row in rows} != {profile}:
         raise ConfigError("Samplesheet library_protocol does not match LIBRARY_PROTOCOL")
+    layouts = {row["library_layout"] for row in rows}
+    if layouts != {configured_layout}:
+        raise ConfigError(
+            "Samplesheet library_layout does not match LIBRARY_LAYOUT; mixed SE/PE projects are unsupported"
+        )
     samples = collapse_samples(rows)
     sample_ids = [sample["sample_id"] for sample in samples]
     if len(sample_ids) != len(set(sample_ids)):

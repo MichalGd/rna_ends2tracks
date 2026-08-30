@@ -70,7 +70,7 @@ else
   printf 'environment\tconda_package_inventory\tWARN\tconda not available in audit shell\n' >> "$report"
 fi
 
-commands=(python3 Rscript fastqc multiqc samtools bedtools bamCoverage bedGraphToBigWig STAR bbduk.sh featureCounts)
+commands=(python3 Rscript fastqc fastq_screen bowtie2 multiqc samtools bedtools bamCoverage bedGraphToBigWig STAR bbduk.sh featureCounts)
 for command_name in "${commands[@]}"; do
   candidate="$cut_env/bin/$command_name"
   if [[ -x "$candidate" ]]; then

@@ -9,6 +9,8 @@ dependencies:
   - pyyaml=6
   - pysam=0.22
   - fastqc=0.12.1
+  - fastq-screen=0.16.0
+  - bowtie2
   - multiqc=1.25
   - bbmap=39.13
   - star=2.7.11b

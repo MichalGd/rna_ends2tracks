@@ -33,16 +33,23 @@
       "description": "Sequencing lane nested within technical_replicate_id."
     },
     "fastq_r1": {"type": "string", "pattern": "\\.(fastq|fq)\\.gz$"},
-    "fastq_r2": {"const": ""},
+    "fastq_r2": {"type": "string", "pattern": "^$|\\.(fastq|fq)\\.gz$"},
     "condition": {"type": "string", "minLength": 1},
     "batch": {"type": "string"},
     "subject": {
       "type": "string",
       "description": "Matched biological-unit ID; repeat it once in each paired condition and leave it empty for unpaired samples."
     },
-    "library_protocol": {"enum": ["quantseq_rev_v2_se", "quantseq_rev_v1_se"]},
-    "library_layout": {"const": "SE"},
+    "library_protocol": {"enum": ["quantseq_rev_v2_se", "quantseq_rev_v1_se", "quantseq_rev_v2_pe", "quantseq_rev_v1_pe"]},
+    "library_layout": {"enum": ["SE", "PE"]},
     "read_length": {"type": ["integer", "string"]},
     "umi_present": {"enum": [false, "false", "no", "0", 0]}
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"library_layout": {"const": "PE"}}},
+      "then": {"properties": {"fastq_r2": {"type": "string", "pattern": "\\.(fastq|fq)\\.gz$"}}},
+      "else": {"properties": {"fastq_r2": {"const": ""}}}
+    }
+  ]
 }

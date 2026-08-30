@@ -834,6 +834,8 @@ def make_report(
     inputs.extend(sorted((results / "02_alignment").rglob("*Log.final.out")))
     inputs.append(results / "02_alignment" / "protocol_orientation.tsv")
     inputs.extend([
+        results / "01_qc" / "fastq_screen" / "fastq_screen_summary.tsv",
+        results / "01_qc" / "fastq_screen" / "fastq_screen_metrics.tsv",
         results / "01_qc" / "rseqc" / "rseqc_summary.tsv",
         results / "01_qc" / "rseqc" / "gene_body_coverage.tsv",
         results / "01_qc" / "rseqc" / "gene_body_coverage.svg",
@@ -845,10 +847,14 @@ def make_report(
     inputs.extend(sorted((results / "10_reports" / "enrichment_summary").rglob("*.tsv")))
     for row in _rows(enrichment_index_path):
         for field in (
-            "prepared_gene_table", "ora_file", "gsea_file", "mapping_audit", "provenance_file",
+            "prepared_gene_table", "ora_file", "gsea_file", "plot_index", "mapping_audit", "provenance_file",
         ):
             if row.get(field):
                 inputs.append(Path(row[field]))
+        plot_index = Path(row.get("plot_index", ""))
+        if plot_index.is_file():
+            for plot in _rows(plot_index):
+                inputs.extend(Path(plot[key]) for key in ("pdf", "png") if plot.get(key))
     inputs.append(results / "10_reports" / "enrichment_summary" / "run_receipt.json")
     validation_manifest = Path(str(plan.project.get("apa_b", {}).get("validation_manifest", "")))
     if validation_manifest.is_file():
@@ -893,6 +899,16 @@ def make_report(
     ]
     module_rows = [{"module": label, "status": _receipt_status(results / directory) if enabled else "DISABLED"}
                    for label, directory, enabled in modules]
+    fastq_screen_rows = _rows(results / "01_qc" / "fastq_screen" / "fastq_screen_summary.tsv")
+    fastq_screen_metrics = _rows(results / "01_qc" / "fastq_screen" / "fastq_screen_metrics.tsv")
+    fastq_screen_statuses = {row.get("status", "") for row in fastq_screen_rows}
+    fastq_screen_status = (
+        "PASS" if fastq_screen_statuses == {"PASS"}
+        else "DISABLED" if fastq_screen_statuses == {"DISABLED"}
+        else "SKIPPED_MISSING_CONFIG" if "SKIPPED_MISSING_CONFIG" in fastq_screen_statuses
+        else "UNAVAILABLE"
+    )
+    module_rows.insert(1, {"module": "FastQ Screen", "status": fastq_screen_status})
     summary = outdir / "run_summary.tsv"
     with summary.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=["module", "status"], delimiter="\t", lineterminator="\n")
@@ -959,6 +975,15 @@ def make_report(
          Path(row["plot_png"]))
         for row in enrichment_rows if row.get("plot_png")
     ]
+    for row in enrichment_rows:
+        plot_index = Path(row.get("plot_index", ""))
+        for plot in (_rows(plot_index) if plot_index.is_file() else []):
+            if plot.get("png"):
+                enrichment_images.append((
+                    f"{row.get('analysis_type', '')} {row.get('contrast_id', '')} "
+                    f"{plot.get('method', '')} {plot.get('database', '')} {plot.get('plot_type', '')}",
+                    Path(plot["png"]),
+                ))
     rseqc_images = [
         ("RSeQC gene-body coverage (5-prime to 3-prime)",
          results / "01_qc" / "rseqc" / "gene_body_coverage.svg"),
@@ -1001,6 +1026,11 @@ def make_report(
     if not rseqc_rows:
         lines.append("| unavailable |  |  |  |  |  |  |  |")
     lines += [
+        "", "## FastQ Screen contamination/species QC", "",
+        f"- Status: `{fastq_screen_status}`",
+        "- Per-lane and per-mate inventory: `../01_qc/fastq_screen/fastq_screen_summary.tsv`",
+    ]
+    lines += [
         "", "## Differential and APA summary", "",
         "| Contrast | DGE significant | DGE up | DGE down | APA-A significant genes | APA-A significant sites | APA-B significant genes | APA-B confirmed sites | PCPA A/B | Agreement % |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -1019,15 +1049,15 @@ def make_report(
         "- `top_enrichment_terms.tsv`",
     ]
     lines += ["", "## Gene-set enrichment", "",
-              "| Analysis | Genome | Contrast | Foreground genes | Significant ORA | Significant GSEA |",
-              "|---|---|---|---:|---:|---:|"]
+              "| Analysis | Genome | Contrast | Foreground genes | Significant ORA | Significant GSEA | Rich plots |",
+              "|---|---|---|---:|---:|---:|---:|"]
     lines.extend(
         f"| {row.get('analysis_type', '')} | {row.get('genome', '')} | {row.get('contrast_id', '')} | "
         f"{row.get('foreground_genes', '')} | {row.get('significant_ora_terms', '')} | "
-        f"{row.get('significant_gsea_terms', '')} |" for row in enrichment_rows
+        f"{row.get('significant_gsea_terms', '')} | {row.get('rich_plot_count', '')} |" for row in enrichment_rows
     )
     if not enrichment_rows:
-        lines.append("| disabled/unavailable |  |  |  |  |  |")
+        lines.append("| disabled/unavailable |  |  |  |  |  |  |")
     lines += ["", "## APA-B validation and interpretation", "", f"- Status: `{apa_b_status}`"]
     lines.extend(f"- {row['property']}: {row['value']}" for row in apa_b_rows)
     lines += [
@@ -1058,7 +1088,7 @@ def make_report(
     markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     c_legend = [
-        {"stage": "C0", "meaning": "mapped primary NH=1 alignments", "use": "final BAMs and all-read tracks"},
+        {"stage": "C0", "meaning": "eligible end-defining molecules (R1 fragments in PE)", "use": "exact-end funnel; BAM/all-read tracks retain both PE mates"},
         {"stage": "C1", "meaning": "exact transcript-end counts", "use": "raw exact-end signal"},
         {"stage": "C1S", "meaning": "uncertain clipped-end counts", "use": "QC only; excluded from PAS calling"},
         {"stage": "C2", "meaning": "filtered exact-end counts", "use": "active-PAS discovery"},
@@ -1098,8 +1128,23 @@ def make_report(
         _html_table(samples, sample_fields) if sample_fields else "<p>No sample table available.</p>",
         "<h2 id='qc'>Sequencing, alignment, and 3-prime-end QC</h2>",
         "<p>The STAR table reports each technical-library/lane alignment. The orientation table verifies "
-        "the reverse-compatible QuantSeq REV signal. Count-universe funnels must satisfy "
+        "the reverse-compatible QuantSeq REV signal. In PE, both mate alignments remain in the BAM but the "
+        "end-analysis C0 funnel counts R1 fragments. Count-universe funnels must satisfy "
         "<code>C0 = C1 + C1S</code> and <code>C1 = C2 + C2R</code>.</p>",
+        "<h3>FastQ Screen contamination/species check</h3>",
+        "<p>FastQ Screen examines a configured subset of every lane and mate against the site's species and "
+        "contaminant databases. A skipped status means that no readable FASTQ_SCREEN_CONFIG was supplied; it "
+        "does not mean that contamination was absent. PASS means the screen completed technically; database "
+        "percentages still require interpretation for the expected species and local contaminant panel.</p>",
+        _html_table(fastq_screen_rows, ["sample_id", "technical_replicate_id", "lane_id", "layout",
+                                        "mates", "status", "text_reports", "config"])
+        if fastq_screen_rows else "<p>FastQ Screen information was unavailable.</p>",
+        "<h4>Per-database mapping percentages</h4>",
+        _html_table(fastq_screen_metrics, ["sample_id", "technical_replicate_id", "lane_id", "mate",
+                                           "database", "reads_processed", "pct_unmapped",
+                                           "pct_one_hit_one_library", "pct_multiple_hits_one_library",
+                                           "pct_one_hit_multiple_libraries"])
+        if fastq_screen_metrics else "<p>No per-database FastQ Screen metrics were available.</p>",
         "<h3>STAR mapping</h3>",
         _html_table(star_rows, ["sample_id", "lane", "input_reads", "uniquely_mapped_reads",
                                 "uniquely_mapped_pct", "multimapped_pct", "unmapped_too_short_pct"])
@@ -1151,10 +1196,12 @@ def make_report(
         "<h2 id='enrichment'>Gene-set enrichment</h2>",
         "<p>ORA uses significant foreground genes; ranked GSEA uses the complete tested background. "
         "APA queries distinguish any APA, distal/proximal shifts, and candidate PCPA increases/decreases. "
-        "Mouse gene sets use the orthology mapping recorded in each provenance file.</p>",
+        "GO, Reactome, Hallmark, and KEGG collections are analyzed separately. Database-specific dotplots, "
+        "barplots, and concept networks are indexed for every analysis. Mouse gene sets use the orthology "
+        "mapping recorded in each provenance file.</p>",
         _html_table(enrichment_rows, [field for field in (
             "analysis_type", "genome", "contrast_id", "background_genes", "foreground_genes",
-            "significant_ora_terms", "significant_gsea_terms", "status",
+            "significant_ora_terms", "significant_gsea_terms", "rich_plot_count", "status",
         ) if any(field in row for row in enrichment_rows)]) if enrichment_rows else "<p>Enrichment was disabled or unavailable.</p>",
         "<h3>Top significant enrichment terms</h3>",
         _html_table(enrichment_terms, ENRICHMENT_TERM_FIELDS)

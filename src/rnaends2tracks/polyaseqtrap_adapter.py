@@ -19,6 +19,7 @@ from pathlib import Path
 import pysam
 
 from .apa_a import annotate_site, load_genes, reverse_complement, transcript_end
+from .mcell2019 import is_end_defining_read
 from .paths import workflow_asset
 
 
@@ -74,15 +75,20 @@ def _load_json(path: Path, label: str) -> dict[str, object]:
 
 
 def verify_manifests(installation: dict[str, object], accepted: dict[str, object], species: str,
-                     assembly: str) -> tuple[Path, Path, str]:
+                     assembly: str, library_protocol: str) -> tuple[Path, Path, str]:
     if accepted.get("schema_version") != 1 or accepted.get("status") != "accepted":
         raise RuntimeError("APA-B validation manifest has not been accepted")
     if assembly not in accepted.get("assemblies", []):
         raise RuntimeError(f"APA-B validation manifest does not cover {assembly}")
     if accepted.get("umi_present") is not False or accepted.get("coordinate_deduplication") is not False:
         raise RuntimeError("APA-B validation must record no UMI and no coordinate deduplication")
-    if "quantseq_rev_v2_se" not in accepted.get("library_protocols", []):
-        raise RuntimeError("APA-B validation does not cover QuantSeq REV V2 single-end libraries")
+    protocols = accepted.get("library_protocols")
+    if protocols is None:
+        # Schema-v1 manifests accepted before PE support implicitly cover only
+        # the original QuantSeq REV V2 single-end protocol.
+        protocols = ["quantseq_rev_v2_se"]
+    if not isinstance(protocols, list) or library_protocol not in protocols:
+        raise RuntimeError(f"APA-B validation does not cover {library_protocol}")
     pilot = accepted.get("pilot", {})
     if (not isinstance(pilot, dict) or pilot.get("synthetic_pass") is not True
             or pilot.get("c1_c1s_reuse_equivalent") is not True
@@ -140,13 +146,16 @@ def verify_installation(installation: dict[str, object], species: str) -> tuple[
     return model_path, deepip_script, environment_hash
 
 
-def extract_end_counts(source: Path, target: Path) -> dict[str, int]:
+def extract_end_counts(source: Path, target: Path, library_layout: str = "SE") -> dict[str, int]:
     """Collapse C0 alignments to transcript-oriented cleavage endpoints without deduplication."""
     counts: dict[tuple[str, str, int], int] = defaultdict(int)
-    records = eligible = duplicate_flagged = soft_clipped = 0
+    records = eligible = duplicate_flagged = soft_clipped = non_end_defining_mates = 0
     with pysam.AlignmentFile(source, "rb") as incoming:
         for read in incoming.fetch(until_eof=True):
             records += 1
+            if not is_end_defining_read(read, library_layout):
+                non_end_defining_mates += 1
+                continue
             if read.is_unmapped or read.is_secondary or read.is_supplementary:
                 continue
             eligible += 1
@@ -166,6 +175,7 @@ def extract_end_counts(source: Path, target: Path) -> dict[str, int]:
     return {"records_read": records, "eligible_records": eligible, "records_written": assigned,
             "duplicate_flagged_records_retained": duplicate_flagged,
             "end_soft_clipped_records_included": soft_clipped,
+            "non_end_defining_mate_records": non_end_defining_mates,
             "distinct_exact_end_coordinates": len(counts)}
 
 
@@ -354,7 +364,10 @@ def _prepare_endpoint_job(row: dict[str, str], target: Path, source_mode: str) -
     elif source_mode == "auto" and partial:
         raise RuntimeError(f"APA-B found incomplete reusable exact-end inputs for {row['sample_id']}")
     else:
-        audit = {**extract_end_counts(Path(row["bam"]), target), "endpoint_source": "bam_fallback"}
+        audit = {
+            **extract_end_counts(Path(row["bam"]), target, row.get("library_layout", "SE")),
+            "endpoint_source": "bam_fallback",
+        }
     return row["sample_id"], audit
 
 
@@ -558,18 +571,26 @@ def execute(args: argparse.Namespace) -> int:
     work = outdir / "adapter_work"
     work.mkdir(parents=True, exist_ok=True)
     installation = _load_json(Path(args.installation_manifest), "APA-B installation manifest")
-    if args.pilot_mode:
-        model, deepip_script, environment_hash = verify_installation(installation, args.species)
-    else:
-        accepted = _load_json(Path(args.validation_manifest), "APA-B validation manifest")
-        model, deepip_script, environment_hash = verify_manifests(
-            installation, accepted, args.species, args.assembly
-        )
     with Path(args.bam_manifest).open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
     samples = [row["sample_id"] for row in rows]
     if len(samples) != len(set(samples)) or not samples:
         raise RuntimeError("BAM manifest requires unique non-empty sample_id values")
+    layouts = {str(row.get("library_layout", "SE")).upper() for row in rows}
+    if layouts not in ({"SE"}, {"PE"}):
+        raise RuntimeError("BAM manifest must use one consistent SE or PE library layout")
+    expected_layout = "PE" if args.library_protocol.endswith("_pe") else "SE"
+    if layouts != {expected_layout}:
+        raise RuntimeError(
+            f"BAM-manifest layout {sorted(layouts)} does not match {args.library_protocol}"
+        )
+    if args.pilot_mode:
+        model, deepip_script, environment_hash = verify_installation(installation, args.species)
+    else:
+        accepted = _load_json(Path(args.validation_manifest), "APA-B validation manifest")
+        model, deepip_script, environment_hash = verify_manifests(
+            installation, accepted, args.species, args.assembly, args.library_protocol
+        )
     r_script = workflow_asset("scripts/R/polyaseqtrap_quantseq_rev.R")
     audits: dict[str, dict[str, object]] = {}
     endpoint_paths: dict[str, Path] = {}
@@ -678,6 +699,8 @@ def execute(args: argparse.Namespace) -> int:
         "adapter": "rna_ends2tracks PolyAseqTrap/DeepIP QuantSeq REV genome-wide adapter v1",
         "workflow_adapter": installation.get("workflow_adapter", {}),
         "assembly": args.assembly, "species": args.species,
+        "library_protocol": args.library_protocol,
+        "library_layouts": sorted(layouts),
         "engine": {"name": "PolyAseqTrap", "source_commit": POLYASEQTRAP_COMMIT},
         "deepip": {"source_commit": DEEPIP_COMMIT},
         "model": {"name": "DeepIP", "sha256": DEEPIP_MODEL_SHA256[args.species]},
@@ -707,6 +730,10 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--gtf", required=True)
     value.add_argument("--species", required=True, choices=sorted(DEEPIP_MODEL_SHA256))
     value.add_argument("--assembly", required=True, choices=["GRCh38", "GRCm39"])
+    value.add_argument(
+        "--library-protocol", default="quantseq_rev_v2_se",
+        choices=["quantseq_rev_v1_se", "quantseq_rev_v2_se", "quantseq_rev_v1_pe", "quantseq_rev_v2_pe"],
+    )
     value.add_argument("--outdir", required=True)
     value.add_argument("--threads", type=int, default=1)
     value.add_argument("--endpoint-workers", type=int, default=0,

@@ -25,6 +25,15 @@ def read_tsv(path):
 
 
 class EnrichmentTests(unittest.TestCase):
+    def test_r_enrichment_supports_kegg_and_database_specific_rich_plots(self):
+        script = (Path(__file__).resolve().parents[1] / "scripts" / "R" / "gene_set_enrichment.R").read_text()
+        self.assertIn("CP:KEGG_MEDICUS", script)
+        self.assertIn("CP:KEGG_LEGACY", script)
+        self.assertIn('"dotplot"', script)
+        self.assertIn('"barplot"', script)
+        self.assertIn('"concept_network"', script)
+        self.assertIn('file.path(outdir, "plot_index.tsv")', script)
+
     def test_legacy_apa_a_index_is_regenerated_exactly_before_enrichment(self):
         with tempfile.TemporaryDirectory() as temporary:
             results = Path(temporary) / "results"

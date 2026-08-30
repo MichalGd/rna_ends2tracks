@@ -199,6 +199,20 @@ class PolyAseqTrapAdapterTests(unittest.TestCase):
             self.assertIn({"chrom": "chr1", "position": "100", "strand": "-", "count": "2"}, rows)
             self.assertIn({"chrom": "chr1", "position": "249", "strand": "+", "count": "1"}, rows)
 
+    def test_paired_endpoint_extraction_excludes_r2(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); bam = root / "paired.bam"
+            header = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "chr1", "LN": 1000}]}
+            with pysam.AlignmentFile(bam, "wb", header=header) as handle:
+                for flag, start in ((65, 100), (129, 150)):
+                    read = pysam.AlignedSegment(); read.query_name = "pair1"; read.query_sequence = "A" * 50
+                    read.flag = flag; read.reference_id = 0; read.reference_start = start
+                    read.mapping_quality = 255; read.cigar = ((0, 50),)
+                    read.query_qualities = pysam.qualitystring_to_array("I" * 50); handle.write(read)
+            audit = extract_end_counts(bam, root / "ends.tsv", "PE")
+            self.assertEqual(audit["records_written"], 1)
+            self.assertEqual(audit["non_end_defining_mate_records"], 1)
+
     def test_deepip_csv_parsing_uses_predict_label_and_strips_fasta_label(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "predictions.csv"

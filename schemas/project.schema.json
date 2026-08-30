@@ -21,7 +21,8 @@
       "type": "object",
       "required": ["profile", "has_umi", "retain_duplicate_flagged_reads"],
       "properties": {
-        "profile": {"enum": ["quantseq_rev_v2_se", "quantseq_rev_v1_se"]},
+        "profile": {"enum": ["quantseq_rev_v2_se", "quantseq_rev_v1_se", "quantseq_rev_v2_pe", "quantseq_rev_v1_pe"]},
+        "library_layout": {"enum": ["SE", "PE", "single_end", "paired_end"]},
         "has_umi": {"const": false},
         "retain_duplicate_flagged_reads": {"const": true}
       }

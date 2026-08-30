@@ -84,7 +84,8 @@ def _software_versions() -> list[dict[str, str]]:
         "STAR": ["STAR", "--version"], "samtools": ["samtools", "--version"],
         "featureCounts": ["featureCounts", "-v"], "Rscript": ["Rscript", "--version"],
         "bedtools": ["bedtools", "--version"], "multiqc": ["multiqc", "--version"],
-        "fastqc": ["fastqc", "--version"],
+        "fastqc": ["fastqc", "--version"], "fastq_screen": ["fastq_screen", "--version"],
+        "bowtie2": ["bowtie2", "--version"],
         "RSeQC": ["geneBody_coverage.py", "--version"],
     }
     rows = [{"tool": "rna-ends2tracks", "path": "", "version": __version__, "status": "PASS"},

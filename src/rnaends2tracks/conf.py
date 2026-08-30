@@ -34,7 +34,10 @@ DEFAULTS: dict[str, str] = {
     "ENRICHMENT_GO": "true",
     "ENRICHMENT_REACTOME": "true",
     "ENRICHMENT_HALLMARKS": "true",
-    "ENRICHMENT_KEGG": "false",
+    "ENRICHMENT_KEGG": "true",
+    "ENRICHMENT_RICH_PLOTS": "true",
+    "ENRICHMENT_NETWORK_MAX_TERMS": "8",
+    "ENRICHMENT_NETWORK_MAX_GENES": "50",
     "ENRICHMENT_PADJ": "0.05",
     "ENRICHMENT_DGE_MIN_ABS_LFC": "1.0",
     "ENRICHMENT_APA_MIN_ABS_DELTA_PAU": "0.10",
@@ -52,6 +55,13 @@ DEFAULTS: dict[str, str] = {
     "RSEQC_MIN_TRANSCRIPT_LENGTH": "100",
     "RSEQC_PARALLEL_JOBS": "6",
     "RSEQC_MEMORY_GB": "4",
+    "RUN_FASTQ_SCREEN": "true",
+    "FASTQ_SCREEN_CONFIG": "",
+    "FASTQ_SCREEN_MISSING_ACTION": "warn",
+    "FASTQ_SCREEN_SUBSET": "200000",
+    "FASTQ_SCREEN_THREADS": "4",
+    "FASTQ_SCREEN_PARALLEL_JOBS": "4",
+    "FASTQ_SCREEN_MEMORY_GB": "4",
     "LIBRARY_PROTOCOL": "quantseq_rev_v2_se",
     "LIBRARY_LAYOUT": "single_end",
     "UMI_PRESENT": "false",
@@ -60,6 +70,7 @@ DEFAULTS: dict[str, str] = {
     "BBDUK_REFERENCE": "adapters,polyA_T",
     "TRIM_QUALITY": "10",
     "MINIMUM_READ_LENGTH": "20",
+    "PE_R2_TRIM_5P": "12",
     "ORIENTATION_MIN_FRACTION": "0.75",
     "MIN_REPLICATES_PER_CONDITION": "2",
     "CONDITION_ORDER": "",
@@ -241,7 +252,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
     values = read_conf(path)
     base = Path(values["_CONFIG_PATH"]).parent
     for key, accepted in {
-        "LIBRARY_LAYOUT": {"single_end", "se"},
+        "LIBRARY_LAYOUT": {"single_end", "se", "paired_end", "pe"},
         "MAPPING_POLICY": {"unique_primary"},
         "END_SOFT_CLIP_POLICY": {"exclude_and_report"},
         "PAIRING_MODE": {"auto", "none", "required"},
@@ -250,6 +261,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "PAS_MASK_RESCUE_TIER": {"core", "core_plus_rescue"},
         "PAS_DISCOVERY_THRESHOLD_OPERATOR": {"greater_than"},
         "APA_B_ENDPOINT_SOURCE": {"auto", "exact_ends", "bam"},
+        "FASTQ_SCREEN_MISSING_ACTION": {"warn", "error"},
     }.items():
         if values[key].lower() not in accepted:
             raise ConfError(f"Unsupported {key}: {values[key]}")
@@ -270,8 +282,6 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         value = _int(values, key)
         if value < 1 or value > apa_b_threads:
             raise ConfError(f"{key} must be between 1 and APA_B_THREADS ({apa_b_threads})")
-    if _bool(values, "ENRICHMENT_KEGG"):
-        raise ConfError("ENRICHMENT_KEGG=true is not implemented in alpha.10; use GO, Reactome, or Hallmark")
     if not (_bool(values, "ENRICHMENT_ORA") or _bool(values, "ENRICHMENT_GSEA")):
         raise ConfError("At least one of ENRICHMENT_ORA or ENRICHMENT_GSEA must be true")
     if _bool(values, "RUN_RSEQC") and not any(_bool(values, key) for key in (
@@ -347,6 +357,8 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "design": values["DESIGN"],
         "protocol": {
             "profile": values["LIBRARY_PROTOCOL"].lower(), "has_umi": False,
+            "library_layout": "PE" if values["LIBRARY_LAYOUT"].lower() in {"paired_end", "pe"} else "SE",
+            "end_defining_mate": "R1",
             "retain_duplicate_flagged_reads": True, "mapping_policy": values["MAPPING_POLICY"],
             "end_soft_clip_policy": values["END_SOFT_CLIP_POLICY"],
             "orientation_min_fraction": _float(values, "ORIENTATION_MIN_FRACTION"),
@@ -358,6 +370,13 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             ),
             "trim_quality": _int(values, "TRIM_QUALITY", 0),
             "minimum_length": _int(values, "MINIMUM_READ_LENGTH"),
+            "pe_r2_trim_5p": _int(values, "PE_R2_TRIM_5P", 0),
+            "fastq_screen": {
+                "enabled": _bool(values, "RUN_FASTQ_SCREEN"),
+                "config": _path(values["FASTQ_SCREEN_CONFIG"], base),
+                "missing_action": values["FASTQ_SCREEN_MISSING_ACTION"].lower(),
+                "subset": _int(values, "FASTQ_SCREEN_SUBSET"),
+            },
         },
         "modules": {
             "gene_expression": _bool(values, "RUN_GENE_EXPRESSION"),
@@ -410,7 +429,11 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "enrichment": {
             "ora": _bool(values, "ENRICHMENT_ORA"), "gsea": _bool(values, "ENRICHMENT_GSEA"),
             "go": _bool(values, "ENRICHMENT_GO"), "reactome": _bool(values, "ENRICHMENT_REACTOME"),
-            "hallmarks": _bool(values, "ENRICHMENT_HALLMARKS"), "kegg": False,
+            "hallmarks": _bool(values, "ENRICHMENT_HALLMARKS"),
+            "kegg": _bool(values, "ENRICHMENT_KEGG"),
+            "rich_plots": _bool(values, "ENRICHMENT_RICH_PLOTS"),
+            "network_max_terms": _int(values, "ENRICHMENT_NETWORK_MAX_TERMS"),
+            "network_max_genes": _int(values, "ENRICHMENT_NETWORK_MAX_GENES"),
             "padj": _float(values, "ENRICHMENT_PADJ"),
             "dge_min_abs_lfc": _nonnegative_float(values, "ENRICHMENT_DGE_MIN_ABS_LFC"),
             "apa_min_abs_delta_pau": _nonnegative_float(values, "ENRICHMENT_APA_MIN_ABS_DELTA_PAU"),
@@ -462,6 +485,9 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
                 "samtools_threads": _int(values, "SAMTOOLS_THREADS"),
                 "samtools_sort_memory_per_thread_gb": _int(values, "SAMTOOLS_SORT_MEMORY_PER_THREAD_GB"),
                 "merge_parallel_jobs": _int(values, "SAMPLE_MERGE_PARALLEL_JOBS"), "merge_memory_gb": 16,
+                "fastq_screen_parallel_jobs": _int(values, "FASTQ_SCREEN_PARALLEL_JOBS"),
+                "fastq_screen_threads": _int(values, "FASTQ_SCREEN_THREADS"),
+                "fastq_screen_memory_gb": _int(values, "FASTQ_SCREEN_MEMORY_GB"),
             },
             "rseqc": {
                 "parallel_jobs": _int(values, "RSEQC_PARALLEL_JOBS"),

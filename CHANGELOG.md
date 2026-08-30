@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Accept validated Lexogen QuantSeq REV V1/V2 single-end and paired-end projects, with synchronized mate trimming/alignment, Lexogen REV PE R2 random-primer-prefix trimming, mate-aware aligned-block coverage, fragment-counted DGE diagnostics, and an explicit R1-only cleavage-coordinate contract.
+- Add bounded per-lane/per-mate FastQ Screen species and contamination QC with an external site-managed database configuration, explicit skipped/error policies, receipts, per-database metrics, MultiQC inputs, and final-report integration.
+- Enable reproducible KEGG MEDICUS and KEGG LEGACY ORA/GSEA through the installed MSigDB snapshot.
+- Add database-specific enrichment dotplots, barplots, and bounded gene-to-concept networks in PNG/PDF with a machine-readable plot index and report integration.
+- Make conventional RNA coverage exon-aware with split-CIGAR `bedtools genomecov -split`, preventing introns from being painted as covered sequence.
+
 ## 0.1.0-alpha.10.post7 - 2026-08-29
 
 - Add receipt-backed, bounded RSeQC orientation, read-distribution, and gene-body coverage QC using an exact annotation-derived BED12 reference; integrate its tables, plot, MultiQC output, and QuantSeq-specific interpretation into the final report.

@@ -1,8 +1,23 @@
 # Samplesheet metadata contract
 
-Each row describes one single-end R1 FASTQ from one sequencing lane. A project
-may contain GRCh38, GRCm39, or both, and may contain many conditions, biological samples,
+Each row describes one sequencing lane. For `SE`, `fastq_r1` is required and
+`fastq_r2` must be empty. For `PE`, both mate files are required and must be
+distinct. A project uses one library layout consistently. It may contain
+GRCh38, GRCm39, or both, and may contain many conditions, biological samples,
 technical library preparations, and lanes.
+
+Supported protocol values are `quantseq_rev_v1_se`, `quantseq_rev_v2_se`,
+`quantseq_rev_v1_pe`, and `quantseq_rev_v2_pe`; the suffix must match
+`library_layout`. `umi_present` must be false. In paired mode both mates are
+used for alignment and conventional coverage, but QuantSeq REV R1 alone is the
+end-defining mate for APA counting.
+The default preprocessing removes the first 12 random-primer-derived bases
+from PE R2 only (`PE_R2_TRIM_5P=12`); R1 is not force-trimmed.
+
+The repository includes `config/samplesheet.example.csv` for SE and
+`config/samplesheet.paired_end.example.csv` for PE. For a paired project also
+set `LIBRARY_LAYOUT="paired_end"` and `LIBRARY_PROTOCOL="quantseq_rev_v2_pe"`
+in `config.conf`.
 
 ## Replicate hierarchy
 

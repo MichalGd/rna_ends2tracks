@@ -204,6 +204,9 @@ def apa_a(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         for sample, bam_path in zip(plan.samples, bams):
             with pysam.AlignmentFile(bam_path, "rb") as bam:
                 for read in bam.fetch(until_eof=True):
+                    if plan.project.get("protocol", {}).get("library_layout", "SE") == "PE" and not read.is_read1:
+                        audit["non_end_defining_mate_records"] += 1
+                        continue
                     if read.is_unmapped:
                         continue
                     audit["mapped_records"] += 1
