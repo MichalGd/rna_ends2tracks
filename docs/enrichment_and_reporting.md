@@ -1,6 +1,6 @@
 # Statistical plots, enrichment, provenance, and APA-B interpretation
 
-## What alpha.10 produces
+## What the workflow produces
 
 The primary C4 DESeq2 analysis writes variance-stabilized PCA coordinates, a PCA figure, a sample-distance matrix and heatmap. Every contrast writes its complete DESeq2 table, MA plot, and volcano plot in PDF and PNG. PNG files are embedded in `10_reports/report.html`; PDF and source TSV files remain linked for publication-quality review.
 

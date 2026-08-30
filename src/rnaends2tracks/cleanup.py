@@ -12,7 +12,7 @@ from .external import event
 from .receipts import receipt_valid, sha256, write_receipt
 
 
-SUPPORTED_CLEANUP_EVIDENCE = re.compile(r"^0[.]1[.]0a(?:9|10)(?:[.]post[0-9]+)?$")
+SUPPORTED_CLEANUP_EVIDENCE = re.compile(r"^0[.]1[.]0a(?:9|10|11)(?:[.]post[0-9]+)?$")
 
 
 def _safe_results_root(results: Path) -> Path:
