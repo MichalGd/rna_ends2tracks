@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rnaends2tracks.cli import _downstream_branch_sequences, _status_observations, execute
+from rnaends2tracks.cli import (
+    _downstream_branch_sequences, _resolve_run_config, _status_observations, execute, parser,
+)
+from rnaends2tracks.config import ConfigError
 
 HEADER = (
     "sample_id,description,genome,biological_replicate_id,technical_replicate_id,lane_id,"
@@ -15,6 +18,18 @@ HEADER = (
 
 
 class CliTests(unittest.TestCase):
+    def test_config_option_matches_positional_form_and_rejects_ambiguity(self):
+        flagged = parser().parse_args(["--config", "/project/config.conf"])
+        positional = parser().parse_args(["/project/config.conf"])
+        self.assertEqual(_resolve_run_config(flagged), "/project/config.conf")
+        self.assertEqual(_resolve_run_config(positional), "/project/config.conf")
+        with self.assertRaisesRegex(ConfigError, "Specify the configuration once"):
+            _resolve_run_config(parser().parse_args([
+                "--config", "/project/config.conf", "/other/config.conf",
+            ]))
+        with self.assertRaisesRegex(ConfigError, "A configuration is required"):
+            _resolve_run_config(parser().parse_args([]))
+
     def test_downstream_scheduler_pipelines_tracks_after_dge_and_prioritizes_apa_b(self):
         branches = _downstream_branch_sequences([
             "gene_expression", "apa_a", "apa_b", "tracks",

@@ -37,9 +37,9 @@ PolyAseqTrap and its pinned DeepIP models are deliberately installed as a separa
 Copy the project configuration, samplesheet and one reference-manifest template into the project. Use absolute paths for production FASTQs and references. Validate before submitting compute jobs:
 
 ```bash
-rna-ends2tracks --stop-after validate config/config.conf
-rna-ends2tracks --dry-run config/config.conf
-rna-ends2tracks config/config.conf
+rna-ends2tracks --config config/config.conf --stop-after validate
+rna-ends2tracks --config config/config.conf --dry-run
+rna-ends2tracks --config config/config.conf
 ```
 
 For a scheduler, invoke individual modules in dependency jobs (`preprocess`, then `dge`/`apa-a`/`apa-b`, then `compare` and `report`). Every user runs the same executable; project configuration supplies species and paths.
