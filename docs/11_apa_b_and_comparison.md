@@ -4,7 +4,7 @@ APA-B answers the same biological question with a deliberately different discove
 
 Both methods can detect PAS inside gene bodies. An internal-exonic or intronic PAS upstream of the normal terminal PAS is reported as a candidate premature cleavage/polyadenylation (PCPA) event. The assay does not directly measure polymerase occupancy, so the report must not call it proven premature transcription termination without independent evidence.
 
-APA-B is implemented and available when the selected assembly and library protocol are covered by an accepted site validation manifest. It is off in the portable template to prevent an unvalidated server or protocol from enabling it accidentally; this default does not mean that the method is unfinished.
+APA-B is implemented and available when the selected assembly and library protocol are covered by an accepted site validation manifest. The audited GRCm39 QuantSeq REV single-end new-project template enables both APA-A and APA-B by default. This default does not weaken the gate: an unvalidated assembly or protocol fails configuration validation unless APA-B is explicitly disabled or a matching accepted manifest is supplied.
 
 The audited `biolserv` GRCm39 QuantSeq REV single-end deployment passed its synthetic and real-data pilots and may be enabled with the accepted site manifests documented in the [shared-server quick start](01_quick_start.md). GRCh38 and paired-end APA-B remain outside that accepted scope until their own real-data canaries and manifests pass. Site validation is an administrator operation, not something every project user repeats. After acceptance, the normal project still has only two inputs: `config.conf` and `samplesheet.csv`; users do not activate the APA-B environment or export its paths.
 

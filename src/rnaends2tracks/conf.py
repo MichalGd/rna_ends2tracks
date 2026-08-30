@@ -17,6 +17,9 @@ DEFAULTS: dict[str, str] = {
     "TMP_DIR": "",
     "RUN_GENE_EXPRESSION": "true",
     "RUN_APA_A_MCELL2019": "true",
+    # Preserve legacy configurations that predate explicit APA-B settings.
+    # New projects copy config/config.conf, where both APA methods are enabled
+    # for the audited site scope and guarded by an accepted manifest.
     "RUN_APA_B": "false",
     "APA_B_PILOT_ACCEPTED": "false",
     "APA_B_COMMAND_TEMPLATE": "auto",

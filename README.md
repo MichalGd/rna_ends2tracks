@@ -195,7 +195,7 @@ Every report run also creates `10_reports/bigwig_collections.txt`, a one-column 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11.post2
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11.post3
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).
@@ -208,4 +208,4 @@ Start with the [shared-server quick start](docs/01_quick_start.md), [workflow st
 
 APA-B has a repository-owned, pinned PolyAseqTrap/DeepIP QuantSeq REV adapter and a separate immutable environment. It clusters genome-wide transcript 3′ endpoints with PolyAseqTrap and applies the official species-specific DeepIP model, so internal-exonic and intronic candidate PCPA sites are eligible even far from an annotated gene end.
 
-APA-B is implemented, but it is **validation-scope gated**, not universally enabled. The audited `biolserv` GRCm39 QuantSeq REV single-end deployment has passed its synthetic and real-data pilots and can run APA-B when its accepted manifests are selected in `config.conf`. The portable template remains off by default, and GRCh38 or paired-end APA-B requires its own matching accepted real-data validation. No project user activates the APA-B environment manually. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output. See [APA-B and comparison](docs/11_apa_b_and_comparison.md) and the [pilot contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md).
+APA-B is implemented, but it is **validation-scope gated**, not universally authorized. New projects created from the audited `biolserv` template run both APA-A and APA-B by default because the GRCm39 QuantSeq REV single-end deployment has passed its synthetic and real-data pilots and the template selects its accepted manifests. Set either method's `RUN_*` switch to `false` to disable it. GRCh38 or paired-end APA-B requires its own matching accepted real-data validation and otherwise fails safely during configuration validation; it does not inherit the mouse single-end acceptance. No project user activates the APA-B environment manually. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output. See [APA-B and comparison](docs/11_apa_b_and_comparison.md) and the [pilot contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md).

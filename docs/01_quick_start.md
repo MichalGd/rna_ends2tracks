@@ -12,7 +12,7 @@ rna-ends2tracks --help | head -n 25
 The release documented here is:
 
 ```text
-0.1.0a11.post2
+0.1.0a11.post3
 ```
 
 Use the configuration template belonging to the installed release; do not combine a newer executable with an older unreviewed template.
@@ -22,7 +22,7 @@ Use the configuration template belonging to the installed release; do not combin
 ```bash
 PROJECT="$HOME/Analysis/my_quantseq_project"
 CONFIG_DIR="$PROJECT/config"
-RELEASE_ENV="/opt/conda_envs/rna_ends2tracks-0.1.0a11.post2"
+RELEASE_ENV="/opt/conda_envs/rna_ends2tracks-0.1.0a11.post3"
 
 mkdir -p "$CONFIG_DIR"
 cp "$RELEASE_ENV/share/rna_ends2tracks/config/config.conf" \
@@ -74,7 +74,7 @@ Use the audited GRCh38 block for a human project. Unused genome blocks are ignor
 
 ### APA-B on the current server
 
-APA-B is implemented and the `biolserv` GRCm39 QuantSeq REV single-end deployment has passed its synthetic and real-data acceptance pilots. It is off in the portable template so an unvalidated server or protocol cannot enable it accidentally. For an accepted GRCm39 single-end project, use the site-approved installation and validation manifests:
+APA-A and APA-B are both enabled in the current `biolserv` new-project template. The GRCm39 QuantSeq REV single-end APA-B deployment has passed its synthetic and real-data acceptance pilots, and the template selects the site-approved installation and validation manifests:
 
 ```text
 RUN_APA_B=true
@@ -85,6 +85,18 @@ APA_B_VALIDATION_MANIFEST="~micgdu/GenomicData/PAS_atlases/validation/rna_ends2t
 ```
 
 Do not reuse that validation claim for GRCh38 or paired-end APA-B. Those scopes need their own accepted real-data canary and manifest. APA-A remains available independently for supported projects.
+
+To turn either analysis off for a project, change only its module switch:
+
+```text
+RUN_APA_A_MCELL2019=false
+RUN_APA_B=false
+```
+
+For GRCh38, paired-end, or another unaccepted APA-B scope, set
+`RUN_APA_B=false` unless a matching accepted manifest has been supplied. The
+workflow validates the manifest scope before processing reads and never silently
+substitutes APA-A results for APA-B.
 
 ## 5. Validate before processing reads
 

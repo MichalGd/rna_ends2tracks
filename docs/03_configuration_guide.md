@@ -57,7 +57,8 @@ The main analysis switches are independent:
 ```text
 RUN_GENE_EXPRESSION=true
 RUN_APA_A_MCELL2019=true
-RUN_APA_B=false
+RUN_APA_B=true
+APA_B_PILOT_ACCEPTED=true
 RUN_DGE_ENRICHMENT=true
 RUN_APA_ENRICHMENT=true
 RUN_TRACKS=true
@@ -66,11 +67,13 @@ RUN_FASTQ_SCREEN=true
 ```
 
 APA-A is the built-in Mcell2019-style method. APA-B uses the independently
-pinned PolyAseqTrap/DeepIP sidecar and can be enabled only for an assembly and
-protocol covered by accepted manifests. The audited shared-server GRCm39
-QuantSeq REV single-end scope is accepted; consult the [quick
-start](01_quick_start.md#apa-b-on-the-current-server). The portable template
-remains off so it is safe on unvalidated installations.
+pinned PolyAseqTrap/DeepIP sidecar and can run only for an assembly and protocol
+covered by accepted manifests. The audited shared-server GRCm39 QuantSeq REV
+single-end scope is accepted, so both APA methods are on in its new-project
+template; consult the [quick start](01_quick_start.md#apa-b-on-the-current-server).
+Set `RUN_APA_A_MCELL2019=false` or `RUN_APA_B=false` to disable either method.
+An enabled APA-B run outside the accepted scope fails validation instead of
+silently skipping or borrowing APA-A results.
 
 Enrichment is enabled by default for DGE and APA and can use ORA, GSEA, GO,
 Reactome, Hallmark and KEGG collections. Plot and network limits are adjustable

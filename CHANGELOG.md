@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.11.post3 - 2026-08-30
+
+- Enable both APA-A and the accepted GRCm39 QuantSeq REV single-end APA-B profile in the new-project `config.conf` template by default, while retaining explicit per-method off switches and strict manifest-scope validation.
+- Refresh the documentation with a task-oriented index, shared-server quick start, current workflow-stage/dependency guide, configuration guide, corrected APA-B status, and clearly separated historical alpha records.
+
 ## 0.1.0-alpha.11.post2 - 2026-08-30
 
 - Accept `--config FILE` as the standard launch syntax used by `cutnrun2tracks` and `chip2tracks`, while retaining the existing positional configuration argument.
