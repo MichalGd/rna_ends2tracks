@@ -56,6 +56,11 @@ def _fastq_screen_metrics(
         raise RuntimeError(f"FastQ Screen report has no tabular Genome header: {report}")
     reader = csv.DictReader(lines[header:], delimiter="\t")
     rows: list[dict[str, str]] = []
+
+    def metric(value: dict[str, str], *names: str) -> str:
+        """Normalize FastQ Screen's library (legacy) and genome (0.16) headers."""
+        return next((value[name] for name in names if value.get(name) not in (None, "")), "")
+
     for value in reader:
         if not value.get("Genome"):
             continue
@@ -66,10 +71,18 @@ def _fastq_screen_metrics(
             "mate": _fastq_screen_mate(report, lane), "database": value["Genome"],
             "reads_processed": value.get("#Reads_processed", ""),
             "pct_unmapped": value.get("%Unmapped", ""),
-            "pct_one_hit_one_library": value.get("%One_hit_one_library", ""),
-            "pct_multiple_hits_one_library": value.get("%Multiple_hits_one_library", ""),
-            "pct_one_hit_multiple_libraries": value.get("%One_hit_multiple_libraries", ""),
-            "pct_multiple_hits_multiple_libraries": value.get("%Multiple_hits_multiple_libraries", ""),
+            "pct_one_hit_one_library": metric(
+                value, "%One_hit_one_genome", "%One_hit_one_library",
+            ),
+            "pct_multiple_hits_one_library": metric(
+                value, "%Multiple_hits_one_genome", "%Multiple_hits_one_library",
+            ),
+            "pct_one_hit_multiple_libraries": metric(
+                value, "%One_hit_multiple_genomes", "%One_hit_multiple_libraries",
+            ),
+            "pct_multiple_hits_multiple_libraries": metric(
+                value, "%Multiple_hits_multiple_genomes", "%Multiple_hits_multiple_libraries",
+            ),
             "source_report": str(report),
         })
     if not rows:

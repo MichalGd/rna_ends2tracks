@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.11.post1 - 2026-08-30
+
+- Normalize FastQ Screen 0.16 `*_genome(s)` result headers alongside legacy `*_library/libraries` headers so per-database mapping percentages are populated in consolidated metrics and the final report.
+
 ## 0.1.0-alpha.11 - 2026-08-30
 
 - Accept validated Lexogen QuantSeq REV V1/V2 single-end and paired-end projects, with synchronized mate trimming/alignment, Lexogen REV PE R2 random-primer-prefix trimming, mate-aware aligned-block coverage, fragment-counted DGE diagnostics, and an explicit R1-only cleavage-coordinate contract.
