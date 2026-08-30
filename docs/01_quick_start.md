@@ -74,17 +74,17 @@ Use the audited GRCh38 block for a human project. Unused genome blocks are ignor
 
 ### APA-B on the current server
 
-APA-A and APA-B are both enabled in the current `biolserv` new-project template. The GRCm39 QuantSeq REV single-end APA-B deployment has passed its synthetic and real-data acceptance pilots, and the template selects the site-approved installation and validation manifests:
+APA-A and APA-B are both enabled in the current `biolserv` new-project template. The GRCh38 and GRCm39 QuantSeq REV V2 single-end APA-B deployments have passed their synthetic and real-data acceptance pilots, and the template selects the site-approved installation and combined validation manifest:
 
 ```text
 RUN_APA_B=true
 APA_B_PILOT_ACCEPTED=true
 APA_B_COMMAND_TEMPLATE="auto"
 APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json"
-APA_B_VALIDATION_MANIFEST="~micgdu/GenomicData/PAS_atlases/validation/rna_ends2tracks_APA_B_GRCm39_QuantSeq_REV_post6_v2.json"
+APA_B_VALIDATION_MANIFEST="~micgdu/GenomicData/PAS_atlases/validation/rna_ends2tracks_APA_B_GRCh38_GRCm39_QuantSeq_REV_post6_v3.json"
 ```
 
-Do not reuse that validation claim for GRCh38 or paired-end APA-B. Those scopes need their own accepted real-data canary and manifest. APA-A remains available independently for supported projects.
+Do not reuse that validation claim for paired-end APA-B. Paired-end scope needs its own accepted real-data canary and manifest. APA-A remains available independently for supported projects.
 
 To turn either analysis off for a project, change only its module switch:
 
@@ -93,7 +93,7 @@ RUN_APA_A_MCELL2019=false
 RUN_APA_B=false
 ```
 
-For GRCh38, paired-end, or another unaccepted APA-B scope, set
+For paired-end or another unaccepted APA-B scope, set
 `RUN_APA_B=false` unless a matching accepted manifest has been supplied. The
 workflow validates the manifest scope before processing reads and never silently
 substitutes APA-A results for APA-B.

@@ -68,9 +68,9 @@ RUN_FASTQ_SCREEN=true
 
 APA-A is the built-in Mcell2019-style method. APA-B uses the independently
 pinned PolyAseqTrap/DeepIP sidecar and can run only for an assembly and protocol
-covered by accepted manifests. The audited shared-server GRCm39 QuantSeq REV
-single-end scope is accepted, so both APA methods are on in its new-project
-template; consult the [quick start](01_quick_start.md#apa-b-on-the-current-server).
+covered by accepted manifests. The audited shared-server GRCh38/GRCm39
+QuantSeq REV V2 single-end scope is accepted, so both APA methods are on in
+the new-project template; consult the [quick start](01_quick_start.md#apa-b-on-the-current-server).
 Set `RUN_APA_A_MCELL2019=false` or `RUN_APA_B=false` to disable either method.
 An enabled APA-B run outside the accepted scope fails validation instead of
 silently skipping or borrowing APA-A results.
