@@ -146,9 +146,9 @@ Required columns include:
 
 The resolved maximum CPU/RAM for each pool is written before analysis. Outputs and timing fragments are deterministic even when jobs finish out of order.
 
-Alpha.10 distinguishes executor types in `00_metadata/resource_plan.tsv`: external tools remain in bounded thread-managed subprocess pools, while CPU-bound Python exact-end workers use separate processes so `END_EXTRACTION_PARALLEL_JOBS` corresponds to usable CPU concurrency. The plan also contains a `downstream/module_overlap` row. It validates the combined worst-case thread and memory peak before concurrent downstream branches can start. Final tracks begin as soon as DGE publishes the C4 size factors and therefore do not wait for APA-B; reducing `DOWNSTREAM_MODULE_PARALLEL_JOBS` to `1` restores sequential execution.
+The workflow distinguishes executor types in `00_metadata/resource_plan.tsv`: external tools remain in bounded thread-managed subprocess pools, while CPU-bound Python exact-end workers use separate processes so `END_EXTRACTION_PARALLEL_JOBS` corresponds to usable CPU concurrency. The plan also contains a `downstream/module_overlap` row. It validates the combined worst-case thread and memory peak before concurrent downstream branches can start. Final tracks begin as soon as DGE publishes the C4 size factors and therefore do not wait for APA-B; reducing `DOWNSTREAM_MODULE_PARALLEL_JOBS` to `1` restores sequential execution.
 
-Raw/CPM C0 track workers may overlap the sample-merge phase. The dispatcher first reserves the configured maximum merge CPU and RAM, then starts only the number of track workers that fit inside the remaining global ceilings. A zero-worker result is safe: track publication is deferred automatically to the dedicated `c0_tracks` stage. The current alpha.10 checkpoint does not overlap tracks with STAR itself.
+Raw/CPM C0 track workers may overlap the sample-merge phase. The dispatcher first reserves the configured maximum merge CPU and RAM, then starts only the number of track workers that fit inside the remaining global ceilings. A zero-worker result is safe: track publication is deferred automatically to the dedicated `c0_tracks` stage. The current scheduler does not overlap tracks with STAR itself.
 
 ## Track families
 
@@ -193,7 +193,7 @@ Every report run also creates `10_reports/bigwig_collections.txt`, a one-column 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.10.post7
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rna-ends2tracks"
-version = "0.1.0a10.post7"
+version = "0.1.0a11"
 description = "Portable QuantSeq REV gene-expression and alternative-polyadenylation workflow"
 requires-python = ">=3.10"
 dependencies = [

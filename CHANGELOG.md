@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.11 - 2026-08-30
+
 - Accept validated Lexogen QuantSeq REV V1/V2 single-end and paired-end projects, with synchronized mate trimming/alignment, Lexogen REV PE R2 random-primer-prefix trimming, mate-aware aligned-block coverage, fragment-counted DGE diagnostics, and an explicit R1-only cleavage-coordinate contract.
 - Add bounded per-lane/per-mate FastQ Screen species and contamination QC with an external site-managed database configuration, explicit skipped/error policies, receipts, per-database metrics, MultiQC inputs, and final-report integration.
 - Enable reproducible KEGG MEDICUS and KEGG LEGACY ORA/GSEA through the installed MSigDB snapshot.

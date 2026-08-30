@@ -1226,7 +1226,7 @@ def make_report(
         "<p>The dashboard inventories stage receipts, software/environment packages, reference and PAS-atlas "
         "identities, configuration checksums, and every output file. Large files are validated by size and "
         "modification time; small files also receive SHA-256 checksums.</p>", artifact_html,
-        "<h2>Report scope</h2><p>This alpha.10 report integrates run status, samples, count-universe definitions, "
+        "<h2>Report scope</h2><p>This report integrates run status, samples, count-universe definitions, "
         "validated DGE/APA contrast counts, embedded statistical plots, enrichment results, warnings, browser-track "
         "inventories, RSeQC orientation/distribution/gene-body QC, and complete provenance. MultiQC provides "
         "the detailed FastQC, alignment, and RSeQC source reports. "
