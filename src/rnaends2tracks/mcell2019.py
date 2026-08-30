@@ -35,6 +35,11 @@ def transcript_end(read: Any) -> tuple[int, str, bool]:
     return int(read.reference_start), "-", defining_end_is_clipped(read.cigartuples, False)
 
 
+def is_end_defining_read(read: Any, library_layout: str) -> bool:
+    """QuantSeq REV cleavage coordinates are defined by R1 in paired libraries."""
+    return library_layout.upper() != "PE" or bool(read.is_paired and read.is_read1)
+
+
 def eligible_mapping(read: Any, compatibility_mode: bool = False) -> tuple[bool, str]:
     if read.is_unmapped:
         return False, "unmapped"

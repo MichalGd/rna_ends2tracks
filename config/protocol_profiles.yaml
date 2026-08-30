@@ -20,5 +20,26 @@ profiles:
     featurecounts_strand: 2
     minimum_length: 20
   quantseq_rev_v2_pe:
-    status: disabled_unvalidated
-    reason: "R2 first-12-base handling and paired end-coordinate behavior require a separate pilot"
+    status: validated_contract_requires_local_orientation_pilot
+    layout: PE
+    read1_orientation: opposite_transcript
+    read2_orientation: same_as_transcript
+    end_defining_read: R1
+    end_defining_query_end: 5prime
+    trim_first_12_r2: true
+    umi: false
+    featurecounts_strand: 2
+    count_fragments: true
+    minimum_length: 20
+  quantseq_rev_v1_pe:
+    status: compatibility_profile_requires_local_orientation_pilot
+    layout: PE
+    read1_orientation: opposite_transcript
+    read2_orientation: same_as_transcript
+    end_defining_read: R1
+    end_defining_query_end: 5prime
+    trim_first_12_r2: true
+    umi: false
+    featurecounts_strand: 2
+    count_fragments: true
+    minimum_length: 20

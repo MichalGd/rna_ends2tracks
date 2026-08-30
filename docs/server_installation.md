@@ -14,6 +14,8 @@ bash scripts/bash/install_release.sh \
 
 The installer checks out the exact tag, creates a new environment, installs the package, runs Python tests, parses all R modules, executes the C4 paired/unpaired DESeq2 and track-factor smoke test, exports explicit/pip inventories, freezes the versioned environment, creates a self-contained versioned launcher and atomically promotes the stable symlink. The launcher prepends its immutable environment to `PATH` and clears inherited Python/R library overrides, so users do not need to activate Conda. Existing versioned launchers remain rollback targets.
 
+FastQ Screen itself and Bowtie2 are installed in the immutable workflow environment. Its large multi-genome indexes and `fastq_screen.conf` remain shared site resources outside that environment. Audit their readability, index/aligner compatibility, and reference provenance, then place the configuration path in each project's `FASTQ_SCREEN_CONFIG`. See [FastQ Screen QC](fastq_screen.md).
+
 Installation can run while another workflow is active because it creates different paths. Keep Mamba solving/installation at a low nice priority and choose conservative global run resources. Promotion affects only future invocations: an already running process continues with its loaded interpreter and absolute executable paths.
 
 Reference FASTA/GTF/STAR/atlas assets remain shared read-only inputs and are not duplicated into the Conda environment. Validate both human and mouse config-only canaries before production, then run a small real-read preprocessing/exact-end canary for each genome.

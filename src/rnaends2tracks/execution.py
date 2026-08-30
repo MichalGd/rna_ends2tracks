@@ -32,6 +32,9 @@ DEFAULT_RESOURCES: dict[str, Any] = {
         "samtools_sort_memory_per_thread_gb": 2,
         "merge_parallel_jobs": 1,
         "merge_memory_gb": 8,
+        "fastq_screen_parallel_jobs": 1,
+        "fastq_screen_threads": 2,
+        "fastq_screen_memory_gb": 4,
     },
     "rseqc": {
         "parallel_jobs": 2,
@@ -173,6 +176,8 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
     enrichment = resources["enrichment"]
     tracks = resources["tracks"]
     definitions = [
+        ("preprocess", "fastq_screen", "external_process", counts.get("lanes", 0),
+         pre["fastq_screen_parallel_jobs"], pre["fastq_screen_threads"], pre["fastq_screen_memory_gb"]),
         ("preprocess", "qc_and_trim", "external_process", counts.get("lanes", 0), pre["trim_parallel_jobs"],
          max(pre["fastqc_threads"], pre["bbduk_threads"]), pre["bbduk_memory_gb"]),
         ("preprocess", "star_and_sort", "external_process", counts.get("lanes", 0), pre["star_parallel_jobs"],

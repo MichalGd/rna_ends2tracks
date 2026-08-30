@@ -4,10 +4,98 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rnaends2tracks.config import RunPlan
-from rnaends2tracks.preprocess import _c0_overlap_workers, _remove_owned_temporary_tree, preprocess
+from rnaends2tracks.preprocess import (
+    _c0_overlap_workers, _remove_owned_temporary_tree, _run_fastq_screen, preprocess,
+)
 
 
 class PreprocessOrderTests(unittest.TestCase):
+    def test_fastq_screen_processes_both_paired_mates_and_records_reports(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); results = root / "results"
+            config = root / "fastq_screen.conf"; config.write_text("DATABASE\tMouse\t/index/mm39\n")
+            row = {
+                "sample_id": "S1", "genome": "GRCm39", "technical_replicate_id": "T01",
+                "lane_id": "L001", "fastq_r1": str(root / "S1_R1.fastq.gz"),
+                "fastq_r2": str(root / "S1_R2.fastq.gz"), "library_layout": "PE",
+            }
+            for key in ("fastq_r1", "fastq_r2"):
+                Path(row[key]).write_bytes(b"fastq")
+            plan = RunPlan(
+                project={
+                    "preprocessing": {"fastq_screen": {
+                        "enabled": True, "config": str(config), "missing_action": "error", "subset": 1000,
+                    }},
+                    "resources": {"preprocess": {
+                        "fastq_screen_parallel_jobs": 1, "fastq_screen_threads": 2,
+                        "fastq_screen_memory_gb": 4,
+                    }},
+                },
+                samples=[{"sample_id": "S1", "genome": "GRCm39", "library_layout": "PE"}],
+                sample_rows=[row], contrasts=[], reference={"assembly": "GRCm39"},
+                references={"GRCm39": {"assembly": "GRCm39"}},
+            )
+            commands = []
+
+            def fake_run(command, _log, dry_run=False, cwd=None, env=None):
+                commands.append(command)
+                outdir = Path(command[command.index("--outdir") + 1])
+                path = command[-1]
+                (outdir / f"{Path(path).name.removesuffix('.gz').removesuffix('.fastq')}_screen.txt").write_text(
+                    "FastQ Screen report\nGenome\t#Reads_processed\t%Unmapped\t%One_hit_one_library\t"
+                    "%Multiple_hits_one_library\t%One_hit_multiple_libraries\t"
+                    "%Multiple_hits_multiple_libraries\nMouse\t1000\t5\t90\t2\t2\t1\n",
+                    encoding="utf-8",
+                )
+
+            def immediate(_stage, jobs, _workers, _timing, progress=None):
+                return [worker() for _label, worker in jobs]
+
+            with (patch("rnaends2tracks.preprocess.require_tools"),
+                  patch("rnaends2tracks.preprocess.run", side_effect=fake_run),
+                  patch("rnaends2tracks.preprocess.run_bounded", side_effect=immediate),
+                  patch("rnaends2tracks.preprocess.signature_for", return_value="signature"),
+                  patch("rnaends2tracks.preprocess.write_receipt")):
+                summary = _run_fastq_screen(plan, results, False, False, None)
+
+            self.assertEqual(len(commands), 2)
+            self.assertEqual([command[-1] for command in commands], [row["fastq_r1"], row["fastq_r2"]])
+            self.assertEqual([Path(command[command.index("--outdir") + 1]).name for command in commands],
+                             ["R1", "R2"])
+            text = summary.read_text(encoding="utf-8")
+            self.assertIn("\tPE\tR1,R2\tPASS\t", text)
+            self.assertEqual(text.count("_screen.txt"), 2)
+            metrics = summary.with_name("fastq_screen_metrics.tsv").read_text(encoding="utf-8")
+            self.assertIn("\tR1\tMouse\t1000\t5\t90\t2\t2\t1\t", metrics)
+            self.assertIn("\tR2\tMouse\t1000\t5\t90\t2\t2\t1\t", metrics)
+
+    def test_paired_dry_run_uses_mate_aware_bbduk_and_star(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); results = root / "results"
+            resources = {"temporary_directory": "", "preprocess": {
+                "trim_parallel_jobs": 1, "star_parallel_jobs": 1, "fastqc_threads": 1,
+                "bbduk_threads": 1, "bbduk_memory_gb": 1, "star_threads": 1,
+                "star_memory_gb": 1, "samtools_threads": 1,
+                "samtools_sort_memory_per_thread_gb": 1, "merge_parallel_jobs": 1,
+                "merge_memory_gb": 1}}
+            reference = {"assembly": "GRCm39", "star_index": str(root / "star")}
+            row = {"sample_id": "S1", "genome": "GRCm39", "technical_replicate_id": "T01",
+                   "lane_id": "L001", "fastq_r1": str(root / "R1.fastq.gz"),
+                   "fastq_r2": str(root / "R2.fastq.gz"), "library_layout": "PE"}
+            plan = RunPlan(
+                project={"resources": resources, "preprocessing": {"minimum_length": 20, "trim_quality": 10},
+                         "protocol": {"orientation_min_fraction": 0.75, "library_layout": "PE"}},
+                samples=[{"sample_id": "S1", "genome": "GRCm39", "library_layout": "PE"}],
+                sample_rows=[row], contrasts=[], reference=reference, references={"GRCm39": reference})
+            preprocess(plan, results, dry_run=True)
+            trim_log = (results / "logs" / "preprocess" / "S1.T01.L001.trim.log").read_text()
+            star_log = (results / "logs" / "preprocess" / "S1.T01.L001.star.log").read_text()
+            self.assertIn("in1=", trim_log); self.assertIn("in2=", trim_log)
+            self.assertIn("out1=", trim_log); self.assertIn("out2=", trim_log)
+            self.assertIn("ftl=12", trim_log); self.assertIn("skipr1=t", trim_log)
+            self.assertIn("R1.trimmed.fastq.gz", star_log)
+            self.assertIn("R2.trimmed.fastq.gz", star_log)
+
     def test_multiqc_read_only_temporary_tree_is_removed(self):
         with tempfile.TemporaryDirectory() as temporary:
             tree = Path(temporary) / "multiqc"

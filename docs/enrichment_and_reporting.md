@@ -9,9 +9,10 @@ Gene-set interpretation is a separate workflow stage after DGE and APA statistic
 - over-representation analysis (ORA) on configured significant foregrounds;
 - exploratory ranked GSEA using the complete testable-gene background;
 - GO Biological Process, Molecular Function, and Cellular Component collections;
-- Reactome and Hallmark collections.
+- Reactome and Hallmark collections;
+- KEGG MEDICUS and KEGG LEGACY collections from the installed, version-recorded MSigDB snapshot.
 
-KEGG is disabled because alpha.10 does not yet ship a pinned, license-reviewed source. Setting `ENRICHMENT_KEGG=true` fails validation instead of silently omitting it.
+KEGG enrichment uses the gene sets exposed by the pinned `msigdbr`/MSigDB installation; it does not query the live KEGG API or redistribute KEGG pathway files. KEGG MEDICUS is preferred, while KEGG LEGACY is retained as a separately labelled database. The exact MSigDB and package versions are written to every job's `provenance.tsv`.
 
 ## Analysis-specific universes
 
@@ -36,7 +37,10 @@ ENRICHMENT_GSEA=true
 ENRICHMENT_GO=true
 ENRICHMENT_REACTOME=true
 ENRICHMENT_HALLMARKS=true
-ENRICHMENT_KEGG=false
+ENRICHMENT_KEGG=true
+ENRICHMENT_RICH_PLOTS=true
+ENRICHMENT_NETWORK_MAX_TERMS=8
+ENRICHMENT_NETWORK_MAX_GENES=50
 ENRICHMENT_PADJ=0.05
 ENRICHMENT_DGE_MIN_ABS_LFC=1.0
 ENRICHMENT_APA_MIN_ABS_DELTA_PAU=0.10
@@ -49,7 +53,7 @@ ENRICHMENT_PARALLEL_JOBS=6
 
 ## Outputs
 
-Every enrichment job contains `prepared_gene_table.tsv`, `ora.tsv`, `gsea.tsv`, `mapping_audit.tsv`, `enrichment.pdf`, `enrichment.png`, `provenance.tsv`, and a receipt. The global machine-readable index is `10_reports/enrichment_summary/enrichment_index.tsv`.
+Every enrichment job contains `prepared_gene_table.tsv`, `ora.tsv`, `gsea.tsv`, `mapping_audit.tsv`, `enrichment.pdf`, `enrichment.png`, `provenance.tsv`, `plot_index.tsv`, and a receipt. When `ENRICHMENT_RICH_PLOTS=true`, the `plots/` subdirectory contains database-specific ORA and GSEA dotplots, barplots, and gene-to-concept network plots in both PNG and PDF. Networks are deliberately capped by `ENRICHMENT_NETWORK_MAX_TERMS` and `ENRICHMENT_NETWORK_MAX_GENES` to remain legible. The global machine-readable index is `10_reports/enrichment_summary/enrichment_index.tsv`.
 
 The scientific report publishes both overview and drill-down tables:
 
@@ -83,4 +87,4 @@ APA-B is not inferred from APA-A. It can be interpreted only when all of the fol
 5. the adapter's run-specific `engine_provenance.json` matches the accepted manifest;
 6. UMI processing and coordinate deduplication are both explicitly false.
 
-Otherwise the report says `DISABLED_NOT_VALIDATED` and does not fabricate results. When enabled, APA-A and APA-B keep separate catalogs, gene summaries, enrichment results, and PCPA calls. Only the dedicated comparison output reports positional and direction concordance.
+Otherwise the report says `DISABLED_NOT_VALIDATED` and does not fabricate results. SE and PE are separate validation claims: a paired project requires its exact `quantseq_rev_*_pe` profile in `library_protocols` and a real paired-layout canary in the accepted manifest. When enabled, APA-A and APA-B keep separate catalogs, gene summaries, enrichment results, and PCPA calls. Only the dedicated comparison output reports positional and direction concordance.

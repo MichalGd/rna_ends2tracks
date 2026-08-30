@@ -43,7 +43,10 @@
       "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}}
     },
     "assemblies": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-    "library_protocols": {"type": "array", "contains": {"const": "quantseq_rev_v2_se"}},
+    "library_protocols": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"enum": ["quantseq_rev_v1_se", "quantseq_rev_v2_se", "quantseq_rev_v1_pe", "quantseq_rev_v2_pe"]}
+    },
     "umi_present": {"const": false},
     "coordinate_deduplication": {"const": false},
     "quantseq_rev_adaptation": {"const": "genomewide_no_tail_weighted_PAC"},

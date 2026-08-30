@@ -1,7 +1,7 @@
 import unittest
 
 from rnaends2tracks.apa_a import reverse_complement
-from rnaends2tracks.mcell2019 import transcript_end
+from rnaends2tracks.mcell2019 import is_end_defining_read, transcript_end
 
 
 class FakeRead:
@@ -13,6 +13,13 @@ class FakeRead:
 
 
 class CoordinateTests(unittest.TestCase):
+    def test_paired_quantseq_uses_r1_only_for_cleavage_coordinate(self):
+        r1 = type("Read", (), {"is_paired": True, "is_read1": True})()
+        r2 = type("Read", (), {"is_paired": True, "is_read1": False})()
+        self.assertTrue(is_end_defining_read(r1, "PE"))
+        self.assertFalse(is_end_defining_read(r2, "PE"))
+        self.assertTrue(is_end_defining_read(r2, "SE"))
+
     def test_reverse_alignment_is_plus_transcript_rightmost_base(self):
         self.assertEqual(transcript_end(FakeRead(True, 100, 150, [(0, 50)])), (149, "+", False))
 

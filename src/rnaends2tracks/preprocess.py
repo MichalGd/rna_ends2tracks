@@ -26,6 +26,183 @@ def _fastqc_report(directory: Path, fastq: str | Path) -> Path:
     return directory / f"{name}_fastqc.html"
 
 
+def _fastq_inputs(lane: dict[str, str]) -> list[str]:
+    return [lane["fastq_r1"], *([lane["fastq_r2"]] if lane.get("fastq_r2") else [])]
+
+
+def _fastq_screen_mate(report: Path, lane: dict[str, str]) -> str:
+    if report.parent.name in {"R1", "R2"}:
+        return report.parent.name
+    for mate, key in (("R1", "fastq_r1"), ("R2", "fastq_r2")):
+        value = lane.get(key, "")
+        if not value:
+            continue
+        name = Path(value).name
+        for suffix in (".fastq.gz", ".fq.gz", ".fastq", ".fq", ".gz"):
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+                break
+        if report.name.startswith(f"{name}_screen"):
+            return mate
+    return "UNKNOWN"
+
+
+def _fastq_screen_metrics(
+    report: Path, lane: dict[str, str], token: str,
+) -> list[dict[str, str]]:
+    lines = report.read_text(encoding="utf-8", errors="replace").splitlines()
+    header = next((index for index, line in enumerate(lines) if line.startswith("Genome\t")), None)
+    if header is None:
+        raise RuntimeError(f"FastQ Screen report has no tabular Genome header: {report}")
+    reader = csv.DictReader(lines[header:], delimiter="\t")
+    rows: list[dict[str, str]] = []
+    for value in reader:
+        if not value.get("Genome"):
+            continue
+        rows.append({
+            "sample_id": lane["sample_id"],
+            "technical_replicate_id": lane["technical_replicate_id"],
+            "lane_id": lane["lane_id"], "lane_token": token,
+            "mate": _fastq_screen_mate(report, lane), "database": value["Genome"],
+            "reads_processed": value.get("#Reads_processed", ""),
+            "pct_unmapped": value.get("%Unmapped", ""),
+            "pct_one_hit_one_library": value.get("%One_hit_one_library", ""),
+            "pct_multiple_hits_one_library": value.get("%Multiple_hits_one_library", ""),
+            "pct_one_hit_multiple_libraries": value.get("%One_hit_multiple_libraries", ""),
+            "pct_multiple_hits_multiple_libraries": value.get("%Multiple_hits_multiple_libraries", ""),
+            "source_report": str(report),
+        })
+    if not rows:
+        raise RuntimeError(f"FastQ Screen report contains no database rows: {report}")
+    return rows
+
+
+def _run_fastq_screen(
+    plan: RunPlan, results: Path, dry_run: bool, force: bool,
+    tool_env: dict[str, str] | None,
+) -> Path:
+    """Run lane/mate-aware FastQ Screen and publish a compact status table."""
+    settings = plan.project.get("preprocessing", {}).get("fastq_screen", {})
+    root = results / "01_qc" / "fastq_screen"
+    summary = root / "fastq_screen_summary.tsv"
+    metrics_path = root / "fastq_screen_metrics.tsv"
+    root.mkdir(parents=True, exist_ok=True)
+    config = Path(str(settings.get("config", ""))) if settings.get("config") else None
+    enabled = bool(settings.get("enabled", True))
+    missing_action = str(settings.get("missing_action", "warn"))
+    rows: list[dict[str, str]] = []
+    if not enabled or config is None or not config.is_file():
+        if enabled and missing_action == "error":
+            raise RuntimeError(
+                "FastQ Screen is enabled but FASTQ_SCREEN_CONFIG does not identify a readable database config"
+            )
+        status = "DISABLED" if not enabled else "SKIPPED_MISSING_CONFIG"
+        for lane in plan.sample_rows:
+            rows.append({
+                "sample_id": lane["sample_id"], "technical_replicate_id": lane["technical_replicate_id"],
+                "lane_id": lane["lane_id"], "layout": lane.get("library_layout", "SE"),
+                "mates": "R1,R2" if lane.get("fastq_r2") else "R1", "status": status,
+                "output_directory": "", "config": str(config or ""),
+            })
+        if enabled:
+            event(results / "logs", "fastq_screen", "warning",
+                  "FASTQ_SCREEN_CONFIG is unavailable; contamination screening was explicitly skipped")
+    else:
+        if not dry_run:
+            require_tools(["fastq_screen"])
+        resource = plan.project["resources"]["preprocess"]
+        jobs: list[tuple[str, Any]] = []
+        for lane in plan.sample_rows:
+            token = f"{lane['sample_id']}.{lane['technical_replicate_id']}.{lane['lane_id']}"
+            outdir = root / token
+
+            def worker(lane=lane, token=token, outdir=outdir):
+                inputs = _fastq_inputs(lane)
+                receipt_dir = outdir / ".receipt"
+                marker = outdir / "fastq_screen.complete.json"
+                signature = signature_for([*inputs, config], {
+                    "module": "fastq_screen", "subset": settings.get("subset", 200000),
+                    "threads": resource["fastq_screen_threads"], "layout": lane.get("library_layout", "SE"),
+                }) if not dry_run else "dry-run"
+                if not force and not dry_run and receipt_valid(receipt_dir, signature):
+                    reports = sorted(outdir.glob("*/*_screen.txt"))
+                    return {
+                        "sample_id": lane["sample_id"], "technical_replicate_id": lane["technical_replicate_id"],
+                        "lane_id": lane["lane_id"], "layout": lane.get("library_layout", "SE"),
+                        "mates": "R1,R2" if lane.get("fastq_r2") else "R1", "status": "PASS",
+                        "output_directory": str(outdir), "config": str(config),
+                        "text_reports": ",".join(map(str, reports)),
+                        "_metrics": [item for report in reports
+                                     for item in _fastq_screen_metrics(report, lane, token)],
+                    }
+                outdir.mkdir(parents=True, exist_ok=True)
+                commands: list[list[str]] = []
+                for mate, fastq in zip(("R1", "R2"), inputs):
+                    mate_dir = outdir / mate
+                    mate_dir.mkdir(parents=True, exist_ok=True)
+                    command = [
+                        "fastq_screen", "--conf", str(config), "--outdir", str(mate_dir),
+                        "--threads", str(resource["fastq_screen_threads"]),
+                        "--subset", str(settings.get("subset", 200000)), "--force", fastq,
+                    ]
+                    commands.append(command)
+                    run(command, results / "logs" / "preprocess" / f"{token}.{mate}.fastq_screen.log",
+                        dry_run, env=tool_env)
+                if not dry_run:
+                    reports = sorted(outdir.glob("*/*_screen.txt"))
+                    if len(reports) != len(inputs):
+                        raise RuntimeError(
+                            f"FastQ Screen produced {len(reports)} text reports for {len(inputs)} inputs: {token}"
+                        )
+                    marker.write_text(json.dumps({"status": "PASS", "inputs": inputs,
+                                                  "commands": commands}, indent=2) + "\n",
+                                      encoding="utf-8")
+                    write_receipt(
+                        "fastq_screen_lane", receipt_dir, signature, [marker, *reports],
+                        ["rna-ends2tracks", "fastq_screen", token, *inputs],
+                    )
+                else:
+                    reports = []
+                return {
+                    "sample_id": lane["sample_id"], "technical_replicate_id": lane["technical_replicate_id"],
+                    "lane_id": lane["lane_id"], "layout": lane.get("library_layout", "SE"),
+                    "mates": "R1,R2" if lane.get("fastq_r2") else "R1",
+                    "status": "DRY_RUN" if dry_run else "PASS", "output_directory": str(outdir),
+                    "config": str(config), "text_reports": ",".join(map(str, reports)),
+                    "_metrics": [item for report in reports
+                                 for item in _fastq_screen_metrics(report, lane, token)],
+                }
+
+            jobs.append((token, worker))
+        rows = run_bounded(
+            "fastq_screen", jobs, resource["fastq_screen_parallel_jobs"],
+            results / ".checkpoints" / "timings" / "preprocess" / "fastq_screen",
+            progress=progress_events(results / "logs", "fastq_screen", len(jobs), "lane"),
+        )
+    metrics: list[dict[str, str]] = []
+    for row in rows:
+        metrics.extend(row.pop("_metrics", []))
+    temporary = summary.with_name(f".{summary.name}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        fields = ["sample_id", "technical_replicate_id", "lane_id", "layout", "mates", "status",
+                  "output_directory", "text_reports", "config"]
+        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
+        writer.writeheader(); writer.writerows(rows)
+    temporary.replace(summary)
+    metric_fields = [
+        "sample_id", "technical_replicate_id", "lane_id", "lane_token", "mate", "database",
+        "reads_processed", "pct_unmapped", "pct_one_hit_one_library",
+        "pct_multiple_hits_one_library", "pct_one_hit_multiple_libraries",
+        "pct_multiple_hits_multiple_libraries", "source_report",
+    ]
+    metrics_temporary = metrics_path.with_name(f".{metrics_path.name}.tmp")
+    with metrics_temporary.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=metric_fields, delimiter="\t", lineterminator="\n")
+        writer.writeheader(); writer.writerows(metrics)
+    metrics_temporary.replace(metrics_path)
+    return summary
+
+
 def _temporary_environment(project: dict[str, Any]) -> dict[str, str] | None:
     configured = str(project["resources"].get("temporary_directory", "") or "")
     if not configured:
@@ -87,7 +264,8 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             reference_inputs.extend(star_index / name for name in (
                 "Genome", "SA", "SAindex", "chrName.txt", "chrLength.txt", "genomeParameters.txt",
             ))
-    signature = signature_for([*[row["fastq_r1"] for row in plan.sample_rows], *reference_inputs], {
+    fastq_inputs = [path for row in plan.sample_rows for path in _fastq_inputs(row)]
+    signature = signature_for([*fastq_inputs, *reference_inputs], {
         "module": "preprocess", "protocol": plan.project.get("protocol", {}),
         "preprocessing": plan.project.get("preprocessing", {}),
         "references": plan.references or {plan.reference["assembly"]: plan.reference},
@@ -116,6 +294,9 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
     trim_root = qc_dir / "trimmed_fastq"
     for directory in (raw_qc, trimmed_qc, trim_root):
         directory.mkdir(parents=True, exist_ok=True)
+    fastq_screen_summary = _run_fastq_screen(plan, results, dry_run, force, tool_env)
+    if not dry_run:
+        expected.extend([fastq_screen_summary, fastq_screen_summary.with_name("fastq_screen_metrics.tsv")])
 
     lane_bams: dict[str, list[Path]] = defaultdict(list)
     contexts: list[dict[str, Any]] = []
@@ -126,49 +307,85 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
         lane_prefix = module_dir / sample / "lanes" / token
         lane_prefix.parent.mkdir(parents=True, exist_ok=True)
         lane_bam = lane_prefix.parent / f"{token}.bam"
-        trimmed = trim_root / f"{token}.trimmed.fastq.gz"
+        paired = lane.get("library_layout", "SE") == "PE"
+        trimmed_r1 = trim_root / (f"{token}.R1.trimmed.fastq.gz" if paired else f"{token}.trimmed.fastq.gz")
+        trimmed_r2 = trim_root / f"{token}.R2.trimmed.fastq.gz" if paired else None
         lane_bams[sample].append(lane_bam)
         context = {"lane": lane, "token": token, "lane_prefix": lane_prefix,
-                   "lane_bam": lane_bam, "trimmed": trimmed}
+                   "lane_bam": lane_bam, "trimmed_r1": trimmed_r1, "trimmed_r2": trimmed_r2}
         contexts.append(context)
 
         def trim_worker(context=context):
             lane = context["lane"]
             token = context["token"]
-            trimmed = context["trimmed"]
+            trimmed_r1 = context["trimmed_r1"]
+            trimmed_r2 = context["trimmed_r2"]
             lane_log = log_dir / "preprocess" / f"{token}.trim.log"
             receipt_dir = trim_root / ".receipts" / token
-            trim_signature = signature_for([lane["fastq_r1"]], {
+            trim_signature = signature_for(_fastq_inputs(lane), {
                 "module": "qc_trim_lane", "lane": lane, "preprocessing": trim_cfg,
                 "resources": {key: resource[key] for key in (
                     "fastqc_threads", "bbduk_threads", "bbduk_memory_gb")},
             }) if not dry_run else "dry-run"
             if not force and not dry_run and receipt_valid(receipt_dir, trim_signature):
-                return trimmed
+                return trimmed_r1
             raw_lane_qc = raw_qc / token
             trimmed_lane_qc = trimmed_qc / token
             raw_lane_qc.mkdir(parents=True, exist_ok=True)
             trimmed_lane_qc.mkdir(parents=True, exist_ok=True)
             run(["fastqc", "--threads", str(resource["fastqc_threads"]), "--outdir", str(raw_lane_qc),
-                 lane["fastq_r1"]], lane_log, dry_run, env=tool_env)
-            temporary = trimmed.with_name(f".{trimmed.name}.tmp.fastq.gz")
-            run(["bbduk.sh", f"-Xmx{resource['bbduk_memory_gb']}g", f"in={lane['fastq_r1']}",
-                 f"out={temporary}", f"ref={adapters}", "int=f", "k=13", "ktrim=r",
+                 *_fastq_inputs(lane)], lane_log, dry_run, env=tool_env)
+            temporary_r1 = trimmed_r1.with_name(f".{trimmed_r1.name}.tmp.fastq.gz")
+            temporary_r2 = (trimmed_r2.with_name(f".{trimmed_r2.name}.tmp.fastq.gz")
+                            if trimmed_r2 is not None else None)
+            adapter_r1 = (trimmed_r1.with_name(f".{trimmed_r1.name}.adapter.tmp.fastq.gz")
+                          if trimmed_r2 is not None else temporary_r1)
+            adapter_r2 = (trimmed_r2.with_name(f".{trimmed_r2.name}.adapter.tmp.fastq.gz")
+                          if trimmed_r2 is not None else None)
+            io_args = ([f"in1={lane['fastq_r1']}", f"in2={lane['fastq_r2']}",
+                        f"out1={adapter_r1}", f"out2={adapter_r2}"]
+                       if trimmed_r2 is not None else [f"in={lane['fastq_r1']}", f"out={temporary_r1}"])
+            run(["bbduk.sh", f"-Xmx{resource['bbduk_memory_gb']}g", *io_args,
+                 f"ref={adapters}", "int=f", "k=13", "ktrim=r",
                  "useshortkmers=t", "mink=5", "qtrim=r", f"trimq={trimq}",
                  f"minlength={minimum_length}", f"threads={resource['bbduk_threads']}"],
                 lane_log, dry_run, env=tool_env)
+            r2_trim = int(trim_cfg.get("pe_r2_trim_5p", 12)) if trimmed_r2 is not None else 0
+            if trimmed_r2 is not None and r2_trim:
+                # BBTools documents skipr1 as applying to force trimming. This
+                # synchronized pass therefore removes only the random-primer-
+                # derived R2 prefix while preserving pairing and R1.
+                run([
+                    "bbduk.sh", f"-Xmx{resource['bbduk_memory_gb']}g",
+                    f"in1={adapter_r1}", f"in2={adapter_r2}",
+                    f"out1={temporary_r1}", f"out2={temporary_r2}",
+                    f"ftl={r2_trim}", "skipr1=t", "int=f",
+                    f"threads={resource['bbduk_threads']}",
+                ], lane_log, dry_run, env=tool_env)
+                if not dry_run:
+                    adapter_r1.unlink(missing_ok=True)
+                    adapter_r2.unlink(missing_ok=True)
+            elif trimmed_r2 is not None and not dry_run:
+                adapter_r1.replace(temporary_r1)
+                adapter_r2.replace(temporary_r2)
             if not dry_run:
-                temporary.replace(trimmed)
+                temporary_r1.replace(trimmed_r1)
+                if temporary_r2 is not None and trimmed_r2 is not None:
+                    temporary_r2.replace(trimmed_r2)
             run(["fastqc", "--threads", str(resource["fastqc_threads"]), "--outdir", str(trimmed_lane_qc),
-                 str(trimmed)], lane_log, dry_run, env=tool_env)
+                 str(trimmed_r1), *([str(trimmed_r2)] if trimmed_r2 is not None else [])],
+                lane_log, dry_run, env=tool_env)
             if not dry_run:
+                outputs = [trimmed_r1, *([trimmed_r2] if trimmed_r2 is not None else []),
+                           *[_fastqc_report(raw_lane_qc, path) for path in _fastq_inputs(lane)],
+                           _fastqc_report(trimmed_lane_qc, trimmed_r1)]
+                if trimmed_r2 is not None:
+                    outputs.append(_fastqc_report(trimmed_lane_qc, trimmed_r2))
                 write_receipt(
-                    "qc_trim_lane", receipt_dir, trim_signature,
-                    [trimmed, _fastqc_report(raw_lane_qc, lane["fastq_r1"]),
-                     _fastqc_report(trimmed_lane_qc, trimmed)],
+                    "qc_trim_lane", receipt_dir, trim_signature, outputs,
                     ["rna-ends2tracks", "qc_trim", token],
                 )
-            return trimmed
+            return trimmed_r1
 
         trim_jobs.append((token, trim_worker))
 
@@ -184,13 +401,14 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             token = context["token"]
             lane_prefix = context["lane_prefix"]
             lane_bam = context["lane_bam"]
-            trimmed = context["trimmed"]
+            trimmed_r1 = context["trimmed_r1"]
+            trimmed_r2 = context["trimmed_r2"]
             reference = plan.reference_for(lane["genome"])
             lane_log = log_dir / "preprocess" / f"{token}.star.log"
             receipt_dir = module_dir / lane["sample_id"] / "lanes" / ".receipts" / token
             orientation_json = receipt_dir / "orientation.json"
             star_index = Path(reference["star_index"])
-            lane_signature = signature_for([lane["fastq_r1"], *[
+            lane_signature = signature_for([*_fastq_inputs(lane), *[
                 star_index / name for name in (
                     "Genome", "SA", "SAindex", "chrName.txt", "chrLength.txt", "genomeParameters.txt",
                 )
@@ -206,7 +424,8 @@ def preprocess(plan: RunPlan, results: Path, dry_run: bool = False, force: bool 
             star_prefix = str(lane_prefix) + ".star."
             run(["STAR", "--runThreadN", str(resource["star_threads"]),
                  "--limitGenomeGenerateRAM", str(resource["star_memory_gb"] * 1024**3),
-                 "--genomeDir", reference["star_index"], "--readFilesIn", str(trimmed),
+                 "--genomeDir", reference["star_index"], "--readFilesIn", str(trimmed_r1),
+                 *([str(trimmed_r2)] if trimmed_r2 is not None else []),
                  "--readFilesCommand", "zcat", "--outFileNamePrefix", star_prefix,
                  "--outSAMtype", "BAM", "Unsorted", "--outSAMattributes", "NH", "HI", "AS", "nM", "NM", "MD",
                  "--outSAMattrRGline", f"ID:{token}", f"SM:{lane['sample_id']}",

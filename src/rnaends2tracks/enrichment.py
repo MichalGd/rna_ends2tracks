@@ -13,13 +13,14 @@ from .statistics import r_environment
 
 
 OUTPUT_NAMES = (
-    "ora.tsv", "gsea.tsv", "mapping_audit.tsv", "enrichment.pdf", "enrichment.png", "provenance.tsv",
+    "ora.tsv", "gsea.tsv", "mapping_audit.tsv", "enrichment.pdf", "enrichment.png",
+    "plot_index.tsv", "provenance.tsv",
 )
 INDEX_FIELDS = (
     "analysis_type", "genome", "contrast_id", "status", "prepared_gene_table",
     "background_genes", "foreground_genes", "ora_terms", "significant_ora_terms",
     "gsea_terms", "significant_gsea_terms", "ora_file", "gsea_file", "plot_pdf",
-    "plot_png", "mapping_audit", "provenance_file",
+    "plot_png", "plot_index", "rich_plot_count", "mapping_audit", "provenance_file",
 )
 
 
@@ -123,7 +124,8 @@ def _apa_gene_table(
 
 def _count_significant(path: Path, fdr: float) -> tuple[int, int]:
     rows = _read(path)
-    return len(rows), sum((_number(row.get("padj")) or math.inf) <= fdr for row in rows)
+    values = [_number(row.get("padj")) for row in rows]
+    return len(rows), sum(value is not None and value <= fdr for value in values)
 
 
 def _index_row(
@@ -132,6 +134,8 @@ def _index_row(
 ) -> dict[str, Any]:
     ora_total, ora_significant = _count_significant(outdir / "ora.tsv", fdr)
     gsea_total, gsea_significant = _count_significant(outdir / "gsea.tsv", fdr)
+    plot_index = outdir / "plot_index.tsv"
+    rich_plot_count = len(_read(plot_index)) if plot_index.is_file() else 0
     return {
         "analysis_type": analysis_type, "genome": genome, "contrast_id": contrast_id,
         "status": "PASS", "prepared_gene_table": str(gene_table),
@@ -140,6 +144,7 @@ def _index_row(
         "gsea_terms": gsea_total, "significant_gsea_terms": gsea_significant,
         "ora_file": str(outdir / "ora.tsv"), "gsea_file": str(outdir / "gsea.tsv"),
         "plot_pdf": str(outdir / "enrichment.pdf"), "plot_png": str(outdir / "enrichment.png"),
+        "plot_index": str(plot_index), "rich_plot_count": rich_plot_count,
         "mapping_audit": str(outdir / "mapping_audit.tsv"),
         "provenance_file": str(outdir / "provenance.tsv"),
     }
@@ -253,6 +258,10 @@ def enrichment(
                 "--ora", str(settings["ora"]).lower(), "--gsea", str(settings["gsea"]).lower(),
                 "--go", str(settings["go"]).lower(), "--reactome", str(settings["reactome"]).lower(),
                 "--hallmarks", str(settings["hallmarks"]).lower(),
+                "--kegg", str(settings["kegg"]).lower(),
+                "--rich-plots", str(settings["rich_plots"]).lower(),
+                "--network-max-terms", str(settings["network_max_terms"]),
+                "--network-max-genes", str(settings["network_max_genes"]),
                 "--padj", str(enrichment_padj), "--min-size", str(settings["min_geneset_size"]),
                 "--max-size", str(settings["max_geneset_size"]),
             ]
@@ -264,8 +273,15 @@ def enrichment(
             )
             job_index = job_dir / "job_index.tsv"
             _write(job_index, [row], INDEX_FIELDS)
+            rich_outputs: list[Path] = []
+            plot_index = job_dir / "plot_index.tsv"
+            if plot_index.is_file():
+                for plot_row in _read(plot_index):
+                    rich_outputs.extend(
+                        Path(plot_row[key]) for key in ("pdf", "png") if plot_row.get(key)
+                    )
             write_receipt("enrichment_job", job_dir, job_signature,
-                          [gene_table, *(job_dir / name for name in OUTPUT_NAMES), job_index],
+                          [gene_table, *(job_dir / name for name in OUTPUT_NAMES), *rich_outputs, job_index],
                           ["rna-ends2tracks", "enrichment", analysis_type, contrast_id])
             return row
 
@@ -300,7 +316,11 @@ def enrichment(
     outputs = [index]
     for row in rows:
         outputs.extend([Path(row[field]) for field in (
-            "prepared_gene_table", "ora_file", "gsea_file", "plot_pdf", "plot_png", "mapping_audit", "provenance_file",
+            "prepared_gene_table", "ora_file", "gsea_file", "plot_pdf", "plot_png", "plot_index",
+            "mapping_audit", "provenance_file",
         )])
+        if row.get("plot_index") and Path(row["plot_index"]).is_file():
+            for plot_row in _read(Path(row["plot_index"])):
+                outputs.extend(Path(plot_row[key]) for key in ("pdf", "png") if plot_row.get(key))
     write_receipt("enrichment", outroot, module_signature, outputs, ["rna-ends2tracks", "enrichment"])
     event(log_dir, "enrichment", "completed", f"Completed {len(rows)} DGE/APA enrichment analyses")

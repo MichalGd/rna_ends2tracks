@@ -85,6 +85,29 @@ class ConfTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfError, "APA_B_VALIDATION_MANIFEST"):
                 project_from_conf(config)
 
+    def test_kegg_rich_plots_and_fastq_screen_are_default_enabled(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "config.conf"
+            config.write_text("PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n", encoding="utf-8")
+            project, _ = project_from_conf(config)
+            self.assertTrue(project["enrichment"]["kegg"])
+            self.assertTrue(project["enrichment"]["rich_plots"])
+            self.assertTrue(project["preprocessing"]["fastq_screen"]["enabled"])
+            self.assertEqual(project["preprocessing"]["fastq_screen"]["missing_action"], "warn")
+
+    def test_paired_layout_is_normalized_in_conf(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "config.conf"
+            config.write_text(
+                "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+                "LIBRARY_LAYOUT=paired_end\nLIBRARY_PROTOCOL=quantseq_rev_v2_pe\n",
+                encoding="utf-8",
+            )
+            project, _ = project_from_conf(config)
+            self.assertEqual(project["protocol"]["library_layout"], "PE")
+            self.assertEqual(project["preprocessing"]["pe_r2_trim_5p"], 12)
+            self.assertEqual(project["protocol"]["end_defining_mate"], "R1")
+
     def test_apa_b_parallel_controls_are_bounded_by_engine_threads(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); config = root / "config.conf"

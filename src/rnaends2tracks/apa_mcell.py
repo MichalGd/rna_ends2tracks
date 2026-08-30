@@ -27,6 +27,7 @@ from .mcell2019 import (
     read_chrom_sizes,
     rescue_overlap,
     transcript_end,
+    is_end_defining_read,
     write_tsv,
 )
 from .receipts import receipt_valid, write_receipt
@@ -124,9 +125,13 @@ def _extract_sample(plan: RunPlan, results: Path, sample: dict[str, str], force:
     c1s: dict[tuple[str, str, int], int] = defaultdict(int)
     audit: Counter[str] = Counter()
     compatibility = settings.get("mapping_policy") == "legacy_random_multimapper"
+    library_layout = str(plan.project.get("protocol", {}).get("library_layout", "SE"))
     for bam_path in bams:
         with pysam.AlignmentFile(bam_path, "rb") as bam:
             for read in bam.fetch(until_eof=True):
+                if not is_end_defining_read(read, library_layout):
+                    audit["non_end_defining_mate_records"] += 1
+                    continue
                 eligible, mapping_class = eligible_mapping(read, compatibility)
                 audit[mapping_class] += 1
                 if read.is_duplicate:
@@ -169,7 +174,9 @@ def _extract_sample(plan: RunPlan, results: Path, sample: dict[str, str], force:
     outdir.mkdir(parents=True, exist_ok=True)
     for path, counts in ((c1_path, c1), (c1s_path, c1s), (c2_path, c2), (c2r_path, c2r)):
         _write_positions(path, counts)
-    audit_payload = {**dict(sorted(audit.items())), "sample_id": sample_id, "genome": genome, "audit_scope": audit_scope}
+    audit_payload = {**dict(sorted(audit.items())), "sample_id": sample_id, "genome": genome,
+                     "library_layout": library_layout, "end_defining_mate": "R1",
+                     "audit_scope": audit_scope}
     audit_path.write_text(json.dumps(audit_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_receipt("exact_ends_sample", receipt_dir, signature, outputs, ["rna-ends2tracks", "exact_ends", sample_id])
     return tuple(outputs)  # type: ignore[return-value]

@@ -2,19 +2,19 @@
 
 ## Preprocessing and alignment
 
-The validated profile is Lexogen QuantSeq REV V2 single-end Read 1 without UMIs. Raw and trimmed reads are inspected with FastQC and summarized by MultiQC. BBDuk uses the Lexogen-oriented adapter/poly(A/T) reference with `k=13 ktrim=r useshortkmers=t mink=5 qtrim=r trimq=10 minlength=20` by default. All values that are safe to vary are exposed in `config.conf`.
+The validated profiles are Lexogen QuantSeq REV V2 single-end and paired-end libraries without UMIs. Raw reads are optionally screened against the site-configured FastQ Screen species/contaminant databases, raw and trimmed mates are inspected with FastQC, and all QC is summarized by MultiQC. BBDuk uses the Lexogen-oriented adapter/poly(A/T) reference with `k=13 ktrim=r useshortkmers=t mink=5 qtrim=r trimq=10 minlength=20` by default. Paired inputs use synchronized `in1/in2` and `out1/out2`. A second synchronized BBDuk pass applies `ftl=12 skipr1=t`, removing Lexogen's random-primer-derived first 12 bases from R2 only; `PE_R2_TRIM_5P` makes this explicit and configurable. All values that are safe to vary are exposed in `config.conf`.
 
 STAR maps reads to the assembly selected in each samplesheet row. Human and mouse samples may coexist, but each lane uses its matching reference and every downstream catalog/statistical model remains genome-specific. The workflow audits STAR `ReadsPerGene.out.tab` and expects the reverse-stranded QuantSeq REV profile. Existing STAR indices are accepted after structural validation; `sjdbOverhang` differences generate a review warning because a 150-overhang index can still map shorter 101-nt reads.
 
 After alignment, RSeQC independently evaluates the final C0 BAMs with `infer_experiment.py`, `read_distribution.py`, and `geneBody_coverage.py`. The reference is an assembly-matched BED12 supplied in `config.conf` or deterministically generated from the exact selected GTF. Per-sample work is bounded by `RSEQC_PARALLEL_JOBS`; its summaries, combined gene-body plot, source files, receipt, and dedicated MultiQC report are retained under `01_qc/rseqc`. QuantSeq REV is expected to show strong transcript 3-prime enrichment, so conventional whole-transcript uniformity is not the acceptance criterion. See [RSeQC QC](rseqc.md).
 
-The C0 statistical BAM contains mapped primary `NH=1` alignments. SAM flags 0x4, 0x100 and 0x800 are excluded. Duplicate flags are retained because no UMI establishes molecular identity and real 3′ molecules often share a cleavage coordinate.
+The alignment BAM contains mapped primary `NH=1` alignments. SAM flags 0x4, 0x100 and 0x800 are excluded. In SE it contains one alignment per mapped read; in PE it retains both mapped mates. Duplicate flags are retained because no UMI establishes molecular identity and real 3-prime molecules often share a cleavage coordinate.
 
 ## Exact transcript ends
 
-QuantSeq REV reads are antisense to the source transcript. A reverse genomic alignment represents a transcript-plus molecule and its transcript 3′ coordinate is the rightmost aligned reference base (`reference_end-1`). A forward alignment represents transcript-minus and uses `reference_start`.
+QuantSeq REV Read 1 is antisense to the source transcript. A reverse genomic R1 alignment represents a transcript-plus molecule and its transcript 3′ coordinate is the rightmost aligned reference base (`reference_end-1`). A forward R1 alignment represents transcript-minus and uses `reference_start`. For paired libraries, both mates contribute their aligned blocks to conventional all-read coverage, which is normalized per mapped pair by counting R1 records. Split CIGAR blocks are honored so introns are not painted as covered sequence. R2 is explicitly excluded from C1/C1S cleavage-coordinate extraction in both independent APA methods. These tracks show aligned read blocks rather than an inferred insert span.
 
-The defining CIGAR side is checked for soft/hard clipping. Unclipped coordinates form C1; uncertain clipped records form C1S. Mapping-class, clipping and duplicate audits are retained. Required identity: `C0 = C1 + C1S`.
+The defining CIGAR side is checked for soft/hard clipping. Unclipped coordinates form C1; uncertain clipped records form C1S. Mapping-class, clipping and duplicate audits are retained. The end-analysis C0 universe means eligible end-defining molecules (R1 fragments in PE), not the number of mate alignments in a PE BAM. Required identity: `C0 = C1 + C1S`.
 
 ## Internal-priming mask
 
@@ -46,7 +46,7 @@ Unique intronic/non-terminal-exonic PAS in genes that also possess a terminal-ex
 
 C4 sums C3 over uniquely assigned PAS per gene and is the primary raw-integer DESeq2 matrix. Genome-global C4 `poscounts` size factors produce visualization scales. Each pairwise contrast is fitted independently using its resolved paired or unpaired design.
 
-C5 reverse-stranded featureCounts exon counts are diagnostic only. The workflow reports per-sample log-count correlation and genes whose C4/C5 CPM ratio differs by at least fourfold. It never silently substitutes C5 for C4.
+C5 reverse-stranded featureCounts exon counts are diagnostic only. Single-end projects count reads; paired-end projects use `-p --countReadPairs` and count fragments. The workflow reports per-sample log-count correlation and genes whose C4/C5 CPM ratio differs by at least fourfold. It never silently substitutes C5 for C4.
 
 ## APA and shift direction
 

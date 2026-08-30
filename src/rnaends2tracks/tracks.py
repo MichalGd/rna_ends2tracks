@@ -79,20 +79,45 @@ def _size_factors(path: Path) -> dict[str, dict[str, float]]:
         }
 
 
-def _bam_count(bam: Path, log: Path, threads: int) -> int:
-    stdout = run_capture(["samtools", "view", "-@", str(threads), "-c", str(bam)], log)
+def _bam_count(bam: Path, log: Path, threads: int, library_layout: str) -> int:
+    paired_args = ["-f", "64"] if library_layout == "PE" else []
+    stdout = run_capture(["samtools", "view", "-@", str(threads), "-c", *paired_args, str(bam)], log)
     return int(stdout.strip())
 
 
-def _strand_bam(bam: Path, strand: str, output: Path, threads: int, log: Path) -> None:
-    flag_args = ["-f", "16"] if strand == "plus" else ["-F", "16"]
-    run(["samtools", "view", "-@", str(threads), "-b", *flag_args, "-o", str(output), str(bam)], log, False)
+def _strand_bam(
+    bam: Path, strand: str, output: Path, threads: int, log: Path, library_layout: str,
+) -> None:
+    if library_layout != "PE":
+        flag_args = ["-f", "16"] if strand == "plus" else ["-F", "16"]
+        run(["samtools", "view", "-@", str(threads), "-b", *flag_args,
+             "-o", str(output), str(bam)], log, False)
+        return
+    # QuantSeq REV PE: transcript-plus is R1 reverse + R2 forward;
+    # transcript-minus is R1 forward + R2 reverse. Both mates contribute
+    # aligned blocks to conventional coverage, whereas only R1 defines
+    # cleavage endpoints. The CPM denominator counts one R1 per mapped pair.
+    selections = (
+        (["-f", "80"], ["-f", "128", "-F", "16"])
+        if strand == "plus" else
+        (["-f", "64", "-F", "16"], ["-f", "144"])
+    )
+    parts: list[Path] = []
+    for index, selection in enumerate(selections, start=1):
+        part = output.with_name(f".{output.name}.part{index}.bam")
+        run(["samtools", "view", "-@", str(threads), "-b", *selection,
+             "-o", str(part), str(bam)], log, False)
+        parts.append(part)
+    run(["samtools", "merge", "-@", str(threads), "-f", str(output), *map(str, parts)], log, False)
+    for part in parts:
+        part.unlink(missing_ok=True)
 
 
 def _all_read_bedgraph(strand_bam: Path, strand: str, output: Path, scale: float, log: Path) -> None:
     positive = output if strand == "plus" else output.with_suffix(".positive.bedGraph")
     run_to_path(
-        ["bedtools", "genomecov", "-ibam", str(strand_bam), "-bg", "-scale", f"{scale:.15g}"],
+        ["bedtools", "genomecov", "-ibam", str(strand_bam), "-bg", "-split",
+         "-scale", f"{scale:.15g}"],
         positive, log,
     )
     if strand == "minus":
@@ -109,6 +134,7 @@ def _sample_tracks_subset(
     receipt_group: str,
 ) -> tuple[list[Path], list[dict[str, Any]]]:
     sample_id, genome = sample["sample_id"], sample["genome"]
+    library_layout = sample.get("library_layout", plan.project.get("protocol", {}).get("library_layout", "SE"))
     reference = plan.reference_for(genome)
     settings = plan.project["tracks"]
     families = {
@@ -168,7 +194,10 @@ def _sample_tracks_subset(
     family_rows: dict[str, list[dict[str, str]]] = {}
     denominators: dict[str, int] = {}
     if families["all_reads"]:
-        denominators["all_reads"] = _bam_count(bam, results / "logs" / "tracks" / f"{sample_id}.count.log", resource["samtools_threads"])
+        denominators["all_reads"] = _bam_count(
+            bam, results / "logs" / "tracks" / f"{sample_id}.count.log",
+            resource["samtools_threads"], library_layout,
+        )
     for family, filename in END_FAMILIES.items():
         if families[family]:
             rows = _end_counts(results / "03_exact_ends" / genome / sample_id / filename)
@@ -194,6 +223,7 @@ def _sample_tracks_subset(
             _strand_bam(
                 bam, strand, strand_bam, resource["samtools_threads"],
                 results / "logs" / "tracks" / f"{sample_id}.all_reads.{strand}.strand_bam.log",
+                library_layout,
             )
             strand_bams[strand] = strand_bam
 

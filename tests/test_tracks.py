@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from rnaends2tracks.config import RunPlan
 from rnaends2tracks.tracks import (
+    _all_read_bedgraph,
+    _strand_bam,
     _sample_tracks_subset,
     make_c0_tracks,
     make_c0_tracks_for_sample,
@@ -13,6 +15,30 @@ from rnaends2tracks.tracks import (
 
 
 class EarlyTrackTests(unittest.TestCase):
+    def test_all_read_coverage_splits_spliced_alignment_blocks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); output = root / "plus.bedGraph"
+            with patch("rnaends2tracks.tracks.run_to_path") as runner:
+                _all_read_bedgraph(root / "plus.bam", "plus", output, 1.0, root / "log")
+            self.assertIn("-split", runner.call_args.args[0])
+
+    def test_paired_strand_tracks_combine_r1_and_r2_orientations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); output = root / "plus.bam"
+            commands = []
+            def fake_run(command, *_args, **_kwargs):
+                commands.append(command)
+                if "-o" in command:
+                    Path(command[command.index("-o") + 1]).write_bytes(b"bam")
+                elif command[:2] == ["samtools", "merge"]:
+                    Path(command[command.index("-f") + 1]).write_bytes(b"bam")
+            with patch("rnaends2tracks.tracks.run", side_effect=fake_run):
+                _strand_bam(root / "input.bam", "plus", output, 2, root / "log", "PE")
+            views = [command for command in commands if command[:2] == ["samtools", "view"]]
+            self.assertIn("80", views[0])
+            self.assertIn("128", views[1]); self.assertIn("-F", views[1]); self.assertIn("16", views[1])
+            self.assertTrue(output.is_file())
+
     def test_sample_ready_c0_tracks_use_only_raw_and_cpm(self):
         sample = {"sample_id": "S1", "genome": "GRCm39"}
         reference = {"assembly": "GRCm39", "chrom_sizes": "chrom.sizes"}
@@ -116,7 +142,7 @@ class EarlyTrackTests(unittest.TestCase):
             reference = {"assembly": "GRCm39", "chrom_sizes": str(sizes)}
             plan = RunPlan(project, [sample], [], [], reference, {"GRCm39": reference})
 
-            def fake_strand_bam(_bam, _strand, output, _threads, _log):
+            def fake_strand_bam(_bam, _strand, output, _threads, _log, _layout):
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_bytes(b"strand")
 

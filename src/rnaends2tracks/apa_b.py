@@ -26,7 +26,9 @@ REQUIRED_FIT_AUDIT = {
 }
 
 
-def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
+def _validation_manifest(
+    path: Path, genomes: list[str], library_protocol: str = "quantseq_rev_v2_se",
+) -> dict[str, object]:
     if not path.is_file():
         raise RuntimeError(f"APA-B validation manifest is unavailable: {path}")
     try:
@@ -61,8 +63,15 @@ def _validation_manifest(path: Path, genomes: list[str]) -> dict[str, object]:
         raise RuntimeError("APA-B validation must explicitly record no UMI and no coordinate deduplication")
     if payload.get("quantseq_rev_adaptation") != "genomewide_no_tail_weighted_PAC":
         raise RuntimeError("APA-B validation manifest covers a different QuantSeq REV adaptation")
-    if "quantseq_rev_v2_se" not in payload.get("library_protocols", []):
-        raise RuntimeError("APA-B validation does not cover quantseq_rev_v2_se")
+    protocols = payload.get("library_protocols")
+    if protocols is None:
+        # Accepted manifests created before paired-end support represented the
+        # validated QuantSeq REV V2 SE contract implicitly. Keep that narrow
+        # compatibility path; PE always requires a newly reviewed PE canary.
+        protocols = ["quantseq_rev_v2_se"]
+        payload["library_protocols"] = protocols
+    if not isinstance(protocols, list) or library_protocol not in protocols:
+        raise RuntimeError(f"APA-B validation does not cover {library_protocol}")
     missing = sorted(set(genomes).difference(map(str, payload.get("assemblies", []))))
     if missing:
         raise RuntimeError("APA-B validation does not cover assemblies: " + ", ".join(missing))
@@ -98,6 +107,8 @@ def _validate_engine_provenance(path: Path, accepted: dict[str, object], assembl
             raise RuntimeError(f"APA-B engine provenance does not match accepted {section}.{field}")
     if observed.get("umi_present") is not False or observed.get("coordinate_deduplication") is not False:
         raise RuntimeError("APA-B engine provenance violates the accepted no-UMI/no-dedup contract")
+    if observed.get("library_protocol") not in accepted.get("library_protocols", []):
+        raise RuntimeError("APA-B engine provenance reports a library protocol outside the accepted pilot")
 
 
 def _header(path: Path) -> list[str]:
@@ -230,7 +241,8 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         raise RuntimeError("apa_b.command_template is required for the pinned local PolyAseqTrap installation")
     validation_path = Path(str(settings.get("validation_manifest", "")))
     installation_path = Path(str(settings.get("installation_manifest", "")))
-    accepted_validation = _validation_manifest(validation_path, list(plan.references))
+    library_protocol = str(plan.project.get("protocol", {}).get("profile", "quantseq_rev_v2_se"))
+    accepted_validation = _validation_manifest(validation_path, list(plan.references), library_protocol)
     bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples]
     endpoint_inputs = [
         results / "03_exact_ends" / sample["genome"] / sample["sample_id"] / filename
@@ -270,11 +282,12 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
         genome_bams = [results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in samples]
         with manifest.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-            writer.writerow(["sample_id", "bam", "c1", "c1s", "exact_end_audit", "exact_end_receipt"])
+            writer.writerow(["sample_id", "bam", "library_layout", "end_defining_mate",
+                             "c1", "c1s", "exact_end_audit", "exact_end_receipt"])
             for sample, bam in zip(samples, genome_bams):
                 exact_root = results / "03_exact_ends" / genome / sample["sample_id"]
                 writer.writerow([
-                    sample["sample_id"], bam,
+                    sample["sample_id"], bam, sample.get("library_layout", "SE"), "R1",
                     exact_root / "C1_exact_ends.tsv.gz",
                     exact_root / "C1S_uncertain_ends.tsv.gz",
                     exact_root / "end_audit.json",
@@ -288,6 +301,7 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
                         "endpoint_workers": str(plan.project["resources"]["apa_b"]["endpoint_parallel_jobs"]),
                         "cluster_workers": str(plan.project["resources"]["apa_b"]["cluster_parallel_jobs"]),
                         "deepip_threads": str(plan.project["resources"]["apa_b"]["deepip_threads"]),
+                        "library_protocol": library_protocol,
                         "validation_manifest": str(validation_path),
                         "installation_manifest": str(settings.get("installation_manifest", "")),
                         "apa_b_executable": str(
@@ -300,6 +314,7 @@ def apa_b(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False
                 "--species {species} --assembly {assembly} --outdir {outdir} --threads {threads} "
                 "--endpoint-source {endpoint_source} --endpoint-workers {endpoint_workers} "
                 "--cluster-workers {cluster_workers} --deepip-threads {deepip_threads} "
+                "--library-protocol {library_protocol} "
                 "--validation-manifest {validation_manifest} --installation-manifest {installation_manifest}"
             )
         try:

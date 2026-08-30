@@ -19,6 +19,7 @@ reference:
 
 protocol:
   profile: quantseq_rev_v2_se
+  library_layout: SE
   has_umi: false
   retain_duplicate_flagged_reads: true
   orientation_min_fraction: 0.75
@@ -26,6 +27,8 @@ protocol:
 preprocessing:
   trim_quality: 10
   minimum_length: 20
+  # Used only for PE; removes Lexogen's random-primer-derived R2 prefix.
+  pe_r2_trim_5p: 12
   # Default packaged FASTA contains TruSeq adapters plus poly(A)18/poly(T)18.
   bbduk_reference: adapters,polyA_T
 

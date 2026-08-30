@@ -30,11 +30,33 @@ class ApaBValidationTests(unittest.TestCase):
                 "assembly": "GRCm39", "workflow_adapter": value["workflow_adapter"],
                 "engine": value["engine"], "model": value["model"],
                 "environment": value["environment"], "umi_present": False,
-                "coordinate_deduplication": False,
+                "coordinate_deduplication": False, "library_protocol": "quantseq_rev_v2_se",
             }
             provenance.write_text(json.dumps(observed), encoding="utf-8")
             accepted = _validation_manifest(manifest, ["GRCm39"])
             _validate_engine_provenance(provenance, accepted, "GRCm39")
+
+    def test_paired_protocol_requires_explicit_paired_acceptance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "validation.json"; value = accepted_manifest()
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "quantseq_rev_v2_pe"):
+                _validation_manifest(path, ["GRCm39"], "quantseq_rev_v2_pe")
+            value["library_protocols"].append("quantseq_rev_v2_pe")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            self.assertEqual(
+                _validation_manifest(path, ["GRCm39"], "quantseq_rev_v2_pe")["status"], "accepted"
+            )
+
+    def test_legacy_manifest_is_compatible_only_with_original_v2_se_protocol(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "validation.json"; value = accepted_manifest()
+            value.pop("library_protocols")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            observed = _validation_manifest(path, ["GRCm39"], "quantseq_rev_v2_se")
+            self.assertEqual(observed["library_protocols"], ["quantseq_rev_v2_se"])
+            with self.assertRaisesRegex(RuntimeError, "quantseq_rev_v2_pe"):
+                _validation_manifest(path, ["GRCm39"], "quantseq_rev_v2_pe")
 
     def test_draft_or_missing_real_canary_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

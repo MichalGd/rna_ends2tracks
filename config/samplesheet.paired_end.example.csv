@@ -1,0 +1,5 @@
+sample_id,description,genome,biological_replicate_id,technical_replicate_id,lane_id,fastq_r1,fastq_r2,condition,batch,subject,library_protocol,library_layout,read_length,kit_catalog,umi_present
+CTRL_01,Control biological replicate 1,GRCm39,CTRL_01,T01,L001,/data/project/CTRL_01_R1.fastq.gz,/data/project/CTRL_01_R2.fastq.gz,control,B1,PAIR_01,quantseq_rev_v2_pe,PE,150,QuantSeq_REV_V2,false
+CTRL_02,Control biological replicate 2,GRCm39,CTRL_02,T01,L001,/data/project/CTRL_02_R1.fastq.gz,/data/project/CTRL_02_R2.fastq.gz,control,B1,PAIR_02,quantseq_rev_v2_pe,PE,150,QuantSeq_REV_V2,false
+TREAT_01,Treatment biological replicate 1,GRCm39,TREAT_01,T01,L001,/data/project/TREAT_01_R1.fastq.gz,/data/project/TREAT_01_R2.fastq.gz,treatment,B1,PAIR_01,quantseq_rev_v2_pe,PE,150,QuantSeq_REV_V2,false
+TREAT_02,Treatment biological replicate 2,GRCm39,TREAT_02,T01,L001,/data/project/TREAT_02_R1.fastq.gz,/data/project/TREAT_02_R2.fastq.gz,treatment,B1,PAIR_02,quantseq_rev_v2_pe,PE,150,QuantSeq_REV_V2,false
