@@ -17,6 +17,7 @@ COMPATIBLE_WORKFLOW_VERSIONS = {
     "0.1.0a9.post1": frozenset({"0.1.0a9"}),
     "0.1.0a9.post2": frozenset({"0.1.0a9", "0.1.0a9.post1"}),
     "0.1.0a11.post1": frozenset({"0.1.0a11"}),
+    "0.1.0a11.post2": frozenset({"0.1.0a11", "0.1.0a11.post1"}),
 }
 
 

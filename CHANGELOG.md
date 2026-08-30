@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.11.post2 - 2026-08-30
+
+- Accept `--config FILE` as the standard launch syntax used by `cutnrun2tracks` and `chip2tracks`, while retaining the existing positional configuration argument.
+
 ## 0.1.0-alpha.11.post1 - 2026-08-30
 
 - Normalize FastQ Screen 0.16 `*_genome(s)` result headers alongside legacy `*_library/libraries` headers so per-database mapping percentages are populated in consolidated metrics and the final report.

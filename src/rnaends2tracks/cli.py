@@ -70,7 +70,10 @@ def parser() -> argparse.ArgumentParser:
                         help="Ignore matching receipt for this step; may be repeated")
     result.add_argument("--skip-input-checks", action="store_true",
                         help="Metadata-only validation; intended for portable CI examples")
-    result.add_argument("config", help="Restricted KEY=value config.conf")
+    result.add_argument("--config", dest="config_option", metavar="FILE",
+                        help="Restricted KEY=value config.conf")
+    result.add_argument("config", nargs="?",
+                        help="Restricted KEY=value config.conf (legacy positional form)")
     return result
 
 
@@ -239,7 +242,19 @@ def _summary(plan: RunPlan, results: Path) -> dict[str, object]:
     }
 
 
+def _resolve_run_config(args: argparse.Namespace) -> str:
+    positional = getattr(args, "config", None)
+    option = getattr(args, "config_option", None)
+    if positional and option:
+        raise ConfigError("Specify the configuration once, using either --config FILE or positional FILE")
+    value = option or positional
+    if not value:
+        raise ConfigError("A configuration is required; use --config FILE or positional FILE")
+    return str(value)
+
+
 def execute(args: argparse.Namespace) -> int:
+    args.config = _resolve_run_config(args)
     if args.skip_input_checks and not args.dry_run and _normal_step(args.stop_after, "") != "validate":
         raise ConfigError("--skip-input-checks is allowed only with --dry-run or --stop-after validate")
     plan = build_conf_plan(args.config, check_inputs=not args.skip_input_checks)

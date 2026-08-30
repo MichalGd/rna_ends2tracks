@@ -5,8 +5,10 @@
 The normal interface deliberately resembles `ATACseq2tracks`:
 
 ```bash
-rna-ends2tracks /path/to/project/config/config.conf
+rna-ends2tracks --config /path/to/project/config/config.conf
 ```
+
+The earlier positional form, `rna-ends2tracks /path/to/config.conf`, remains supported.
 
 Each project has only two input-configuration files:
 
@@ -80,14 +82,14 @@ The `C` labels mean workflow-specific **count universes**, not standard RNA-seq 
 4. Validate without executing tools:
 
 ```bash
-rna-ends2tracks --stop-after validate config/config.conf
+rna-ends2tracks --config config/config.conf --stop-after validate
 ```
 
 5. Review `00_metadata/resolved_config.tsv`, `contrasts.tsv`, `warnings.tsv`, and `resource_plan.tsv`.
 6. Run:
 
 ```bash
-rna-ends2tracks config/config.conf
+rna-ends2tracks --config config/config.conf
 ```
 
 The workflow writes one chronological master log inside the configured `OUTPUT_DIR`. Monitor it or request a concise snapshot from another shell:
@@ -103,10 +105,10 @@ The status snapshot includes the workflow PID and whether it is still running, a
 Useful controls:
 
 ```bash
-rna-ends2tracks --dry-run config/config.conf
-rna-ends2tracks --from-step exact_ends config/config.conf
-rna-ends2tracks --stop-after alignment config/config.conf
-rna-ends2tracks --force-step tracks config/config.conf
+rna-ends2tracks --config config/config.conf --dry-run
+rna-ends2tracks --config config/config.conf --from-step exact_ends
+rna-ends2tracks --config config/config.conf --stop-after alignment
+rna-ends2tracks --config config/config.conf --force-step tracks
 ```
 
 With the default `GENERATE_EARLY_C0_TRACKS=true`, raw and CPM all-read BigWigs are produced by the resumable `c0_tracks` stage immediately after alignment, before exact-end, DGE, and APA analysis. The later `tracks` stage reuses those outputs and generates only end-derived families; it does not repeat C0 strand extraction.
@@ -193,7 +195,7 @@ Every report run also creates `10_reports/bigwig_collections.txt`, a one-column 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11.post1
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11.post2
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).
