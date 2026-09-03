@@ -19,7 +19,8 @@ class ConfTests(unittest.TestCase):
         self.assertEqual(values["RUN_APA_A2"], "true")
         self.assertEqual(values["RUN_APA_B"], "true")
         self.assertEqual(values["APA_B_PILOT_ACCEPTED"], "true")
-        self.assertTrue(values["APA_B_VALIDATION_MANIFEST"])
+        self.assertIn("0.1.0a11.post3", values["APA_B_INSTALLATION_MANIFEST"])
+        self.assertIn("alpha11_post3_v4.json", values["APA_B_VALIDATION_MANIFEST"])
 
         # A minimal legacy config remains APA-B-off unless it explicitly opts
         # into the manifest-gated method.

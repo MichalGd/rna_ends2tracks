@@ -114,6 +114,24 @@ class ReceiptTests(unittest.TestCase):
                 receipt.write_text(json.dumps(payload), encoding="utf-8")
                 self.assertFalse(receipt_valid(receipt_dir, "sig"))
 
+    def test_alpha12_post1_accepts_alpha12_and_audited_alpha11_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); output = root / "result.tsv"; output.write_bytes(b"abc")
+            receipt_dir = root / "receipt"
+            receipt = write_receipt("test", receipt_dir, "sig", [output], ["test"])
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            with patch("rnaends2tracks.receipts.__version__", "0.1.0a12.post1"):
+                for version in (
+                    "0.1.0a11", "0.1.0a11.post1", "0.1.0a11.post2", "0.1.0a11.post3",
+                    "0.1.0a12",
+                ):
+                    payload["workflow_version"] = version
+                    receipt.write_text(json.dumps(payload), encoding="utf-8")
+                    self.assertTrue(receipt_valid(receipt_dir, "sig"))
+                payload["workflow_version"] = "0.1.0a10.post7"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertFalse(receipt_valid(receipt_dir, "sig"))
+
 
 if __name__ == "__main__":
     unittest.main()
