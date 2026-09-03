@@ -25,7 +25,7 @@ DEFAULTS: dict[str, str] = {
     "APA_B_PILOT_ACCEPTED": "false",
     "APA_B_COMMAND_TEMPLATE": "auto",
     "APA_B_VALIDATION_MANIFEST": "",
-    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json",
+    "APA_B_INSTALLATION_MANIFEST": "/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a11.post3/installation_manifest.json",
     "APA_B_THREADS": "8",
     "APA_B_ENDPOINT_SOURCE": "auto",
     "APA_B_ENDPOINT_PARALLEL_JOBS": "8",

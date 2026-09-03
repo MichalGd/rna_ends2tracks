@@ -35,21 +35,21 @@ Because discovery is genome-wide, an intronic or internal-exonic site far upstre
 APA-B has older deep-learning dependencies and is deliberately isolated from the main workflow environment:
 
 ```bash
-bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.10.post6
+bash scripts/bash/install_apa_b.sh --tag v0.1.0-alpha.11.post3
 ```
 
-The default installation is release-specific, for example `/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6`. The script verifies the source/model pins, records the exact workflow-adapter release and Git commit, installs the adapter, exports an explicit environment lock, writes `installation_manifest.json`, and makes the versioned environment read-only. Installation alone does **not** accept the method scientifically.
+The validated `biolserv` installation is `/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a11.post3`. The script verifies the source/model pins, records the exact workflow-adapter release and Git commit, installs the adapter, exports an explicit environment lock, writes `installation_manifest.json`, and makes the versioned environment read-only. Installation alone does **not** accept the method scientifically.
 
 PolyAseqTrap declares GPL-3. The reviewed DeepIP repository does not currently expose a clear software/model license file. Non-commercial research use does not itself resolve missing license terms; the server administrator should record institutional approval or obtain clarification from the authors before redistribution or broader deployment.
 
 ## Pilot gate
 
-Before production use, run a synthetic truth set and at least one real QuantSeq REV canary for every assembly and protocol scope that will be enabled. The synthetic audit must confirm strand/base coordinates, exact equivalence of BAM-derived endpoints and receipt-validated C1+C1S reuse, count conservation, duplicate-flag retention, DeepIP positive/negative behavior, and retention of an intragenic site. A real canary must produce the five adapter deliverables and conserve eligible records. The audited `biolserv` post6 sidecar, synthetic pilot, and GRCh38/GRCm39 QuantSeq REV V2 single-end canaries satisfy this gate for those two assemblies and that protocol. Paired-end APA-B still needs its own accepted real-data validation.
+Before production use, run a synthetic truth set and at least one real QuantSeq REV canary for every assembly and protocol scope that will be enabled. The synthetic audit must confirm strand/base coordinates, exact equivalence of BAM-derived endpoints and receipt-validated C1+C1S reuse, count conservation, duplicate-flag retention, DeepIP positive/negative behavior, and retention of an intragenic site. A real canary must produce the five adapter deliverables and conserve eligible records. The audited `biolserv` alpha.11.post3 sidecar, synthetic pilot, and GRCh38/GRCm39 QuantSeq REV V2 single-end canaries satisfy this gate for those two assemblies and that protocol. Paired-end APA-B still needs its own accepted real-data validation.
 
 Run the synthetic pilot directly from the immutable APA-B environment:
 
 ```bash
-APA_B_ENV=/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6
+APA_B_ENV=/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a11.post3
 "$APA_B_ENV/bin/rna-ends2tracks-run-apa-b-synthetic-pilot" --installation-manifest "$APA_B_ENV/installation_manifest.json" --output /path/to/synthetic_pilot_audit.json
 ```
 
@@ -58,8 +58,8 @@ For a pre-acceptance real canary, invoke `rna-ends2tracks-apa-b` with `--pilot-m
 Create the acceptance manifest only after reviewing those results:
 
 ```bash
-/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/bin/rna-ends2tracks-accept-apa-b-pilot \
-  --installation-manifest /opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json \
+/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a11.post3/bin/rna-ends2tracks-accept-apa-b-pilot \
+  --installation-manifest /opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a11.post3/installation_manifest.json \
   --synthetic-audit /path/to/synthetic_pilot_audit.json \
   --real-canary GRCh38=/path/to/human_canary/output \
   --real-canary GRCm39=/path/to/mouse_canary/output \
@@ -75,13 +75,13 @@ The builder refuses incomplete audits. Human and mouse may be accepted together 
 RUN_APA_B=true
 APA_B_PILOT_ACCEPTED=true
 APA_B_COMMAND_TEMPLATE="auto"
-APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json"
+APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a11.post3/installation_manifest.json"
 APA_B_ENDPOINT_SOURCE="auto"
 APA_B_THREADS=16
 APA_B_ENDPOINT_PARALLEL_JOBS=8
 APA_B_CLUSTER_PARALLEL_JOBS=12
 APA_B_DEEPIP_THREADS=16
-APA_B_VALIDATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-validation/accepted_GRCh38_GRCm39.json"
+APA_B_VALIDATION_MANIFEST="~micgdu/GenomicData/PAS_atlases/validation/rna_ends2tracks_APA_B_GRCh38_GRCm39_QuantSeq_REV_alpha11_post3_v4.json"
 ```
 
 `APA_B_ENDPOINT_SOURCE="auto"` first validates the existing per-sample exact-end receipt, checks the recorded counts and source files, and reconstructs the raw adapter input as C1+C1S. This is count- and coordinate-equivalent to rereading C0: C1 contributes unclipped exact ends and C1S contributes the separately reported end-clipped records that APA-B retains. C2 is never reused because it contains APA-A-specific internal-priming filtering. If a complete validated C1+C1S set is absent, `auto` falls back to BAM extraction; `exact_ends` makes reuse mandatory and `bam` forces an independent rescan.

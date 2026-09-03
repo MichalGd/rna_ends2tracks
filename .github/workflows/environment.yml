@@ -56,7 +56,7 @@ jobs:
           bbduk.sh in=rev_smoke.fastq out=rev_smoke.trimmed.fastq ref=resources/quantseq_rev_adapters.fa int=f k=13 ktrim=r useshortkmers=t mink=5 qtrim=r trimq=10 minlength=20 threads=1
           test -s rev_smoke.trimmed.fastq
           fastq_screen --version
-          bowtie2 --version | head -n 1
+          bowtie2 --version
           Rscript -e 'packages <- c("DESeq2", "DEXSeq", "DRIMSeq", "stageR", "fgsea", "msigdbr", "ggplot2"); stopifnot(all(vapply(packages, requireNamespace, logical(1), quietly=TRUE))); print(sessionInfo())'
           Rscript scripts/R/gene_set_enrichment.R --self-test
       - name: Run package and mixed-pairing integration tests

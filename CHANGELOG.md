@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.12.post1 - 2026-09-03
+
+- Point the bundled new-project configuration and current documentation to the
+  accepted alpha.11.post3 APA-B sidecar and combined GRCh38/GRCm39 QuantSeq REV
+  V2 single-end validation manifest. The previous alpha.10.post6 sidecar lacks
+  the required `--library-protocol` interface. No APA statistical method or
+  output contract changed.
+
 ## 0.1.0-alpha.12 - 2026-09-03
 
 - Add independently switchable, default-enabled APA-A2 alongside the preserved

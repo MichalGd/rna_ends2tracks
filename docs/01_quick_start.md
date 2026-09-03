@@ -12,7 +12,7 @@ rna-ends2tracks --help | head -n 25
 The release documented here is:
 
 ```text
-0.1.0a12
+0.1.0a12.post1
 ```
 
 Use the configuration template belonging to the installed release; do not combine a newer executable with an older unreviewed template.
@@ -22,7 +22,7 @@ Use the configuration template belonging to the installed release; do not combin
 ```bash
 PROJECT="$HOME/Analysis/my_quantseq_project"
 CONFIG_DIR="$PROJECT/config"
-RELEASE_ENV="/opt/conda_envs/rna_ends2tracks-0.1.0a12"
+RELEASE_ENV="/opt/conda_envs/rna_ends2tracks-0.1.0a12.post1"
 
 mkdir -p "$CONFIG_DIR"
 cp "$RELEASE_ENV/share/rna_ends2tracks/config/config.conf" \
@@ -80,8 +80,8 @@ APA-A, corrected APA-A2, and APA-B are enabled in the current `biolserv` new-pro
 RUN_APA_B=true
 APA_B_PILOT_ACCEPTED=true
 APA_B_COMMAND_TEMPLATE="auto"
-APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post6/installation_manifest.json"
-APA_B_VALIDATION_MANIFEST="~micgdu/GenomicData/PAS_atlases/validation/rna_ends2tracks_APA_B_GRCh38_GRCm39_QuantSeq_REV_post6_v3.json"
+APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a11.post3/installation_manifest.json"
+APA_B_VALIDATION_MANIFEST="~micgdu/GenomicData/PAS_atlases/validation/rna_ends2tracks_APA_B_GRCh38_GRCm39_QuantSeq_REV_alpha11_post3_v4.json"
 ```
 
 Do not reuse that validation claim for paired-end APA-B. Paired-end scope needs its own accepted real-data canary and manifest. APA-A and APA-A2 remain available independently for supported projects.
