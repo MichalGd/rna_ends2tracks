@@ -20,7 +20,7 @@ def _plan() -> RunPlan:
             "cleanup": {"enabled": True, "keep_trimmed_fastq": False, "keep_lane_bams": False,
                 "keep_apa_sample_extraction": False, "keep_track_strand_bams": False,
                 "keep_track_bedgraphs": False},
-            "modules": {"gene_expression": True, "apa_a": True, "tracks": True},
+            "modules": {"gene_expression": True, "apa_a": True, "apa_a2": False, "tracks": True},
             "apa_b": {"enabled": False},
         },
         samples=[{"sample_id": "S1"}],

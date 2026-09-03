@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.12 - 2026-09-03
+
+- Add independently switchable, default-enabled APA-A2 alongside the preserved
+  APA-A and validated APA-B methods. APA-A2 reruns DEXSeq on the shared,
+  condition-blind C3 catalog and computes raw-count within-gene PAU effects,
+  equal-weight paired differences, effect-qualified primary calls, transcript-
+  coordinate shifts, numerical audits, PCPA candidates and enrichment.
+- Extend status, resource planning, cleanup validation and the final scientific
+  report with APA-A2 result counts, primary events, pathway outputs and
+  provenance while leaving the existing APA-A implementation and APA-A/APA-B
+  catalog comparison unchanged.
+
 ## 0.1.0-alpha.11.post3 - 2026-08-30
 
 - Enable both APA-A and the accepted GRCh38/GRCm39 QuantSeq REV V2 single-end APA-B profile in the new-project `config.conf` template by default, while retaining explicit per-method off switches and strict manifest-scope validation.

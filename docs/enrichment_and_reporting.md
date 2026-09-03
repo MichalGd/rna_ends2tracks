@@ -23,6 +23,8 @@ The analyses are intentionally independent:
 | DGE | genes tested by the contrast-specific C4 DESeq2 model | any DGE, upregulated, downregulated | DESeq2 Wald statistic; signed p-value fallback only when the statistic is unavailable |
 | APA-A | genes tested by DEXSeq with at least two active PAS | any APA, distal shift, proximal shift | signed gene-level DEXSeq shift score |
 | APA-A PCPA | same APA-A testable-gene universe | any candidate PCPA, increased PCPA, decreased PCPA | signed APA shift score |
+| APA-A2 | genes independently tested by DEXSeq with at least two C3 PAS; primary foreground also requires the configured delta-PAU threshold | any primary APA, distal shift, proximal shift | corrected signed weighted-transcript shift score |
+| APA-A2 PCPA | same APA-A2 testable-gene universe | effect-qualified candidate PCPA and direction | corrected signed shift score |
 | APA-B | genes tested by the independent DRIMSeq/stageR model | the corresponding APA and PCPA directions | signed gene-level APA-B shift score |
 
 Mouse collections are obtained through `msigdbr`'s recorded human-to-mouse orthology mapping. Each job writes `mapping_audit.tsv` and `provenance.tsv`, including package and MSigDB version information. Mapping loss, background size, and foreground size are visible in the final report. An empty enrichment result is valid and produces header-only tables plus an explicit no-significant-term plot.
@@ -59,7 +61,7 @@ The scientific report publishes both overview and drill-down tables:
 
 - `differential_gene_expression_summary.tsv`: tested, significant, up- and downregulated genes per contrast;
 - `top_differential_genes.tsv`: up to 25 FDR-significant genes per contrast with effect sizes and adjusted p-values;
-- `alternative_polyadenylation_summary.tsv`: APA-A, APA-B, PCPA and method-concordance counts per contrast;
+- `alternative_polyadenylation_summary.tsv`: APA-A, corrected APA-A2, APA-B, PCPA and existing APA-A/APA-B concordance counts per contrast;
 - `top_apa_gene_events.tsv`: significant gene-level events from each independent APA method, including shift direction and PCPA status;
 - `top_enrichment_terms.tsv`: the strongest significant ORA and GSEA terms for every method/contrast job.
 

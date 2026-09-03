@@ -2,7 +2,7 @@
 
 > **Historical alpha.6 implementation snapshot.** This page records the state
 > before alpha.6 server promotion and is not a current run guide. For the
-> installed alpha.11.post3 workflow, start with the [documentation
+> installed alpha.12 workflow, start with the [documentation
 > index](README.md), [quick start](01_quick_start.md), [workflow
 > steps](02_workflow_steps.md), and current [APA-B guide](11_apa_b_and_comparison.md).
 

@@ -13,20 +13,25 @@ flowchart TD
     E --> P[active_pas]
     P --> D[gene_expression]
     P --> AA[apa_a]
+    P --> AA2[apa_a2]
     E --> AB[apa_b]
     D --> T[tracks]
     AA --> C[apa_comparison]
     AB --> C
     D --> N[enrichment]
     AA --> N
+    AA2 --> N
     AB --> N
+    AA --> R
+    AA2 --> R
+    AB --> R
     T --> R[report]
     C --> R
     N --> R
     R --> X[cleanup]
 ```
 
-After active-PAS discovery, the DGE-then-tracks, APA-A and enabled APA-B branches may run concurrently within the validated aggregate CPU/RAM ceiling. The log can therefore show these independent branches completing in a different order from the list below; their dependencies do not change.
+After active-PAS discovery, the DGE-then-tracks, APA-A, APA-A2 and enabled APA-B branches may run concurrently within the validated aggregate CPU/RAM ceiling. The log can therefore show these independent branches completing in a different order from the list below; their dependencies do not change.
 
 ## Ordered stages
 
@@ -37,12 +42,13 @@ After active-PAS discovery, the DGE-then-tracks, APA-A and enabled APA-B branche
 | `rseqc` | Runs `infer_experiment.py`, `read_distribution.py` and `geneBody_coverage.py` against an assembly-matched BED12 annotation. | `01_qc/rseqc/` summaries, plots and MultiQC inputs. | Disabled by `RUN_RSEQC=false`; individual RSeQC analyses have separate switches. |
 | `c0_tracks` | Publishes strand-specific raw and CPM conventional aligned-read coverage from C0 aligned blocks. | Early `09_tracks/all_reads/` BigWigs/bedGraphs and normalization metadata. | Requires tracks, early-C0 publication and the all-read family. Per-sample work may already have overlapped the merge phase and is then collected rather than repeated. |
 | `exact_ends` | Converts eligible C0 alignments into exact transcript-end C1 counts, separates end-defining soft-clipped C1S records, applies the internal-priming mask/rescue policy and records rejected C2R versus retained C2 ends. | `03_exact_ends/` C1, C1S, C2, C2R and audit tables. | Skipped only when no enabled analysis or track family requires exact ends. |
-| `active_pas` | Pools sample-level C2 CPM condition-blind within each genome, performs the two-round Mcell2019 30-nt discovery, assigns PAS to genes and creates C3 PAS and C4 uniquely assigned gene counts. | `04_active_pas/` catalog, C3/C4 matrices, pooled signal and sample-universe signature. | Skipped only when no enabled DGE/APA-A/normalization module requires active PAS. Changing the project sample universe requires a new output directory. |
+| `active_pas` | Pools sample-level C2 CPM condition-blind within each genome, performs the two-round Mcell2019 30-nt discovery, assigns PAS to genes and creates C3 PAS and C4 uniquely assigned gene counts. | `04_active_pas/` catalog, C3/C4 matrices, pooled signal and sample-universe signature. | Skipped only when no enabled DGE/APA-A/APA-A2/normalization module requires active PAS. Changing the project sample universe requires a new output directory. |
 | `gene_expression` | Uses project-global C4 size factors and contrast-specific paired or unpaired DESeq2 designs; retains C5 featureCounts as a diagnostic. Produces PCA, sample-distance, MA and volcano plots. | `05_gene_expression/` result tables, contrast indexes, normalization factors and plots. | Disabled by `RUN_GENE_EXPRESSION=false`. |
 | `apa_a` | Tests C3 PAS usage with DEXSeq using the Mcell2019-style catalog, derives gene-level summaries, proximal/distal shifts and candidate PCPA calls. | `06_apa_a_mcell2019/` DEXSeq tables, gene summaries, shift tables and audits. | Disabled by `RUN_APA_A_MCELL2019=false`. |
+| `apa_a2` | Independently reruns DEXSeq on C3 and calculates corrected raw-count within-gene PAU effects, equal-weight paired differences, effect-qualified primary calls, weighted transcript shifts and audits. | `06b_apa_a2_corrected/` site/gene/pair tables, shift and numerical-audit tables, PCPA candidates and receipts. | Enabled by default; disabled by `RUN_APA_A2=false`. It shares the condition-blind C3 catalog with APA-A but never consumes APA-A results. |
 | `apa_b` | Independently clusters raw C0-equivalent endpoints with PolyAseqTrap, filters candidates with DeepIP, quantifies its own PAS catalog and tests usage with DRIMSeq/stageR. Receipt-validated C1+C1S may reconstruct the unchanged raw endpoint universe without reusing APA-A filtering. | `07_apa_b/` independent catalog/count matrix, DRIMSeq/stageR tables, NA/fit audits, gene summaries and provenance. | Enabled in the audited GRCh38/GRCm39 QuantSeq REV V2 single-end new-project template. Disabled by `RUN_APA_B=false`; any enabled run requires installation and validation manifests covering its exact protocol/assembly scope. |
-| `apa_comparison` | Matches nearby independently discovered APA-A and APA-B sites and summarizes positional and effect-direction agreement. It never merges the catalogs. | `08_apa_comparison/` proximity and concordance tables. | Requires both APA methods to be enabled and successfully completed. |
-| `enrichment` | Runs bounded DGE, APA-A and validated APA-B ORA/GSEA using enabled GO, Reactome, Hallmark and KEGG collections; creates database-specific plots and gene-concept networks. | Per-analysis enrichment folders plus `10_reports/enrichment_summary/`. | Disabled only when both DGE and APA enrichment are off; individual databases/plot families are configurable. |
+| `apa_comparison` | Matches nearby independently discovered APA-A and APA-B sites and summarizes positional and effect-direction agreement. It never merges the catalogs. | `08_apa_comparison/` proximity and concordance tables. | Requires APA-A and APA-B to be enabled and successfully completed. |
+| `enrichment` | Runs bounded DGE, APA-A, APA-A2 and validated APA-B ORA/GSEA using enabled GO, Reactome, Hallmark and KEGG collections; creates database-specific plots and gene-concept networks. | Per-analysis enrichment folders plus `10_reports/enrichment_summary/`. | Disabled only when both DGE and APA enrichment are off; individual databases/plot families are configurable. |
 | `tracks` | Completes enabled exact-end, filtered/rejected-end and active-PAS raw/CPM/DESeq2/robust-CPM track families, then validates their indexes. Reuses early C0 tracks. | `09_tracks/`, collection indexes and normalization tables. | Disabled by `RUN_TRACKS=false`; individual families and normalization types are configurable. |
 | `report` | Recounts source tables, assembles QC and differential/APA summaries, embeds plots, writes provenance, inventories BigWigs and validates one-line UCSC descriptors. | `10_reports/report.html`, summary TSVs, provenance dashboard, BigWig list and `ucsc_track_descriptors/`. | Not executed during a dry run. Inconsistent source/index totals fail rather than producing a misleading report. |
 | `cleanup` | After successful deliverable validation, removes only allow-listed dispensable intermediates and records every removal. | `provenance/cleanup/cleanup_manifest.tsv` and cleanup receipt. | Not executed during a dry run; disabled by `CLEANUP_INTERMEDIATES=false`; refuses incomplete upstream evidence. |

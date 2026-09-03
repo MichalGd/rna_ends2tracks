@@ -12,10 +12,11 @@ HEADER = "sample_id,description,genome,biological_replicate_id,technical_replica
 
 
 class ConfTests(unittest.TestCase):
-    def test_new_project_template_enables_both_apa_methods(self):
+    def test_new_project_template_enables_all_three_apa_methods(self):
         template = Path(__file__).resolve().parents[1] / "config" / "config.conf"
         values = read_conf(template)
         self.assertEqual(values["RUN_APA_A_MCELL2019"], "true")
+        self.assertEqual(values["RUN_APA_A2"], "true")
         self.assertEqual(values["RUN_APA_B"], "true")
         self.assertEqual(values["APA_B_PILOT_ACCEPTED"], "true")
         self.assertTrue(values["APA_B_VALIDATION_MANIFEST"])
@@ -30,7 +31,17 @@ class ConfTests(unittest.TestCase):
             )
             project, _ = project_from_conf(legacy)
             self.assertTrue(project["modules"]["apa_a"])
+            self.assertTrue(project["modules"]["apa_a2"])
             self.assertFalse(project["modules"]["apa_b"])
+
+            legacy.write_text(
+                "PROJECT_ID=x\nSAMPLESHEET=samples.csv\nOUTPUT_DIR=results\n"
+                "RUN_APA_A2=false\n",
+                encoding="utf-8",
+            )
+            project, _ = project_from_conf(legacy)
+            self.assertTrue(project["modules"]["apa_a"])
+            self.assertFalse(project["modules"]["apa_a2"])
 
     def test_apa_b_scope_is_validated_before_read_processing(self):
         project = {
@@ -58,7 +69,7 @@ class ConfTests(unittest.TestCase):
 
     def test_core_stage_requirements_follow_enabled_tracks(self):
         project = {
-            "modules": {"gene_expression": False, "apa_a": False, "tracks": True},
+            "modules": {"gene_expression": False, "apa_a": False, "apa_a2": False, "tracks": True},
             "apa_b": {"enabled": False},
             "tracks": {
                 "families": {"all_reads": True, "exact_ends": False, "filtered_ends": False,
@@ -183,6 +194,7 @@ class ConfTests(unittest.TestCase):
             project, _ = project_from_conf(config)
             self.assertEqual(project["resources"]["downstream"]["parallel_modules"], 2)
             self.assertEqual(project["resources"]["apa_a"]["contrast_parallel_jobs"], 3)
+            self.assertEqual(project["resources"]["apa_a2"]["contrast_parallel_jobs"], 4)
             self.assertEqual(project["resources"]["apa_b"]["contrast_parallel_jobs"], 4)
 
     def test_mixed_genomes_create_only_within_genome_contrasts(self):

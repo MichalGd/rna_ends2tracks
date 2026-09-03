@@ -47,4 +47,4 @@ If one strand has no signal for a sample/family, its retained bedGraph is empty.
 
 The numbered directories and their `run_receipt.json` files are stable module boundaries. Per-sample and per-contrast receipts live below `.receipts`; timing JSON lives in `.checkpoints/timings`. `00_metadata` contains resolved configuration, samples, lanes, contrasts, warnings and resource ceilings.
 
-Final deliverables preserved by default include C0 sample BAMs, C1/C1S/C2/C2R tables, pooled discovery signal, active-PAS catalog, C3/C4/C5 matrices, DGE/APA statistics, BigWigs, reports and provenance. See the cleanup section in the main README for dispensable files.
+Final deliverables preserved by default include C0 sample BAMs, C1/C1S/C2/C2R tables, pooled discovery signal, active-PAS catalog, C3/C4/C5 matrices, DGE, legacy APA-A, corrected APA-A2 and APA-B statistics, BigWigs, reports and provenance. See the cleanup section in the main README for dispensable files.

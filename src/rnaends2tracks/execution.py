@@ -56,6 +56,11 @@ DEFAULT_RESOURCES: dict[str, Any] = {
         "contrast_threads": 1,
         "contrast_memory_gb": 16,
     },
+    "apa_a2": {
+        "contrast_parallel_jobs": 2,
+        "contrast_threads": 1,
+        "contrast_memory_gb": 16,
+    },
     "apa_b": {
         "engine_threads": 8,
         "engine_memory_gb": 24,
@@ -126,7 +131,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     for key in ("total_threads", "total_memory_gb", "temporary_directory"):
         if key in supplied:
             resolved[key] = supplied[key]
-    for stage in ("downstream", "preprocess", "rseqc", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
+    for stage in ("downstream", "preprocess", "rseqc", "dge", "apa_a", "apa_a2", "apa_b", "enrichment", "tracks"):
         stage_value = supplied.get(stage, {})
         if not isinstance(stage_value, dict):
             raise ValueError(f"resources.{stage} must be a YAML mapping")  # noqa: TRY004
@@ -138,7 +143,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     resolved["total_threads"] = _positive_int(resolved["total_threads"], "resources.total_threads")
     resolved["total_memory_gb"] = _positive_int(resolved["total_memory_gb"], "resources.total_memory_gb")
     resolved["temporary_directory"] = str(resolved.get("temporary_directory", "") or "")
-    for stage in ("downstream", "preprocess", "rseqc", "dge", "apa_a", "apa_b", "enrichment", "tracks"):
+    for stage in ("downstream", "preprocess", "rseqc", "dge", "apa_a", "apa_a2", "apa_b", "enrichment", "tracks"):
         for key, value in list(resolved[stage].items()):
             resolved[stage][key] = _positive_int(value, f"resources.{stage}.{key}")
 
@@ -147,6 +152,7 @@ def resolve_resources(project: dict[str, Any]) -> tuple[dict[str, Any], list[dic
         name for name, enabled in (
             ("gene_expression", modules.get("gene_expression", True)),
             ("apa_a", modules.get("apa_a", True)),
+            ("apa_a2", modules.get("apa_a2", True)),
             ("apa_b", project.get("apa_b", {}).get("enabled", False)),
             ("tracks", modules.get("tracks", True)),
         ) if enabled
@@ -172,6 +178,7 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
     rseqc = resources["rseqc"]
     dge = resources["dge"]
     apa_a = resources["apa_a"]
+    apa_a2 = resources["apa_a2"]
     apa_b = resources["apa_b"]
     enrichment = resources["enrichment"]
     tracks = resources["tracks"]
@@ -197,6 +204,8 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
          apa_a["extraction_threads"], apa_a["extraction_memory_gb"]),
         ("apa_a", "contrast", "external_process", counts.get("contrasts", 0), apa_a["contrast_parallel_jobs"],
          apa_a["contrast_threads"], apa_a["contrast_memory_gb"]),
+        ("apa_a2", "contrast", "external_process", counts.get("contrasts", 0), apa_a2["contrast_parallel_jobs"],
+         apa_a2["contrast_threads"], apa_a2["contrast_memory_gb"]),
         ("apa_b", "endpoint_preparation", "python_process", counts.get("samples", 0),
          apa_b["endpoint_parallel_jobs"], 1, apa_b["sample_memory_gb"]),
         ("apa_b", "polyaseqtrap_cluster", "external_process", counts.get("samples", 0),
@@ -233,7 +242,7 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
             "budget_status": "PASS" if max_threads <= resources["total_threads"] and max_memory <= resources["total_memory_gb"] else "FAIL",
         })
     enabled_downstream = set(resources.get(
-        "_enabled_downstream", ("gene_expression", "apa_a", "apa_b", "tracks"),
+        "_enabled_downstream", ("gene_expression", "apa_a", "apa_a2", "apa_b", "tracks"),
     ))
     dge_threads = max(
         dge["featurecounts_threads"],
@@ -259,6 +268,11 @@ def resource_plan_rows(resources: dict[str, Any], counts: dict[str, int] | None 
             "apa_a",
             apa_a["contrast_parallel_jobs"] * apa_a["contrast_threads"],
             apa_a["contrast_parallel_jobs"] * apa_a["contrast_memory_gb"],
+        ),
+        (
+            "apa_a2",
+            apa_a2["contrast_parallel_jobs"] * apa_a2["contrast_threads"],
+            apa_a2["contrast_parallel_jobs"] * apa_a2["contrast_memory_gb"],
         ),
         (
             "apa_b",

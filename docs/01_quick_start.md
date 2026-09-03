@@ -12,7 +12,7 @@ rna-ends2tracks --help | head -n 25
 The release documented here is:
 
 ```text
-0.1.0a11.post3
+0.1.0a12
 ```
 
 Use the configuration template belonging to the installed release; do not combine a newer executable with an older unreviewed template.
@@ -22,7 +22,7 @@ Use the configuration template belonging to the installed release; do not combin
 ```bash
 PROJECT="$HOME/Analysis/my_quantseq_project"
 CONFIG_DIR="$PROJECT/config"
-RELEASE_ENV="/opt/conda_envs/rna_ends2tracks-0.1.0a11.post3"
+RELEASE_ENV="/opt/conda_envs/rna_ends2tracks-0.1.0a12"
 
 mkdir -p "$CONFIG_DIR"
 cp "$RELEASE_ENV/share/rna_ends2tracks/config/config.conf" \
@@ -74,7 +74,7 @@ Use the audited GRCh38 block for a human project. Unused genome blocks are ignor
 
 ### APA-B on the current server
 
-APA-A and APA-B are both enabled in the current `biolserv` new-project template. The GRCh38 and GRCm39 QuantSeq REV V2 single-end APA-B deployments have passed their synthetic and real-data acceptance pilots, and the template selects the site-approved installation and combined validation manifest:
+APA-A, corrected APA-A2, and APA-B are enabled in the current `biolserv` new-project template. The GRCh38 and GRCm39 QuantSeq REV V2 single-end APA-B deployments have passed their synthetic and real-data acceptance pilots, and the template selects the site-approved installation and combined validation manifest:
 
 ```text
 RUN_APA_B=true
@@ -84,12 +84,13 @@ APA_B_INSTALLATION_MANIFEST="/opt/conda_envs/rna_ends2tracks-apa-b-0.1.0a10.post
 APA_B_VALIDATION_MANIFEST="~micgdu/GenomicData/PAS_atlases/validation/rna_ends2tracks_APA_B_GRCh38_GRCm39_QuantSeq_REV_post6_v3.json"
 ```
 
-Do not reuse that validation claim for paired-end APA-B. Paired-end scope needs its own accepted real-data canary and manifest. APA-A remains available independently for supported projects.
+Do not reuse that validation claim for paired-end APA-B. Paired-end scope needs its own accepted real-data canary and manifest. APA-A and APA-A2 remain available independently for supported projects.
 
-To turn either analysis off for a project, change only its module switch:
+To turn any analysis off for a project, change only its module switch:
 
 ```text
 RUN_APA_A_MCELL2019=false
+RUN_APA_A2=false
 RUN_APA_B=false
 ```
 

@@ -21,7 +21,7 @@ def write_tsv(path, fields, rows):
 
 
 class ScientificReportTests(unittest.TestCase):
-    def test_top_event_summaries_cover_dge_and_both_apa_methods(self):
+    def test_top_event_summaries_cover_dge_and_all_three_apa_methods(self):
         with tempfile.TemporaryDirectory() as temporary:
             results = Path(temporary)
             dge = results / "05_gene_expression" / "GRCm39" / "C4_primary_deseq2"
@@ -32,15 +32,16 @@ class ScientificReportTests(unittest.TestCase):
             write_tsv(dge / "result_index.tsv", ["contrast_id", "result_file"], [
                 {"contrast_id": "x", "result_file": str(dge_result)},
             ])
-            for method_dir, method, site_field in (
-                ("06_apa_a_mcell2019", "APA-A", "significant_sites"),
-                ("07_apa_b", "APA-B", "confirmed_sites"),
+            for method_dir, method, site_field, primary in (
+                ("06_apa_a_mcell2019", "APA-A", "significant_sites", ""),
+                ("06b_apa_a2_corrected", "APA-A2", "primary_sites", "true"),
+                ("07_apa_b", "APA-B", "confirmed_sites", ""),
             ):
                 root = results / method_dir / "GRCm39"
                 summary = root / "stats" / "x.gene.tsv"
-                write_tsv(summary, ["gene_id", "gene_padj", "shift", "max_abs_delta_PAU", site_field], [
+                write_tsv(summary, ["gene_id", "gene_padj", "shift", "max_abs_delta_PAU", site_field, "primary_gene"], [
                     {"gene_id": "g1", "gene_padj": "0.02", "shift": "distal",
-                     "max_abs_delta_PAU": "0.3", site_field: "1"},
+                     "max_abs_delta_PAU": "0.3", site_field: "1", "primary_gene": primary},
                 ])
                 write_tsv(root / "stats" / "result_index.tsv", ["contrast_id", "gene_summary_file"], [
                     {"contrast_id": "x", "gene_summary_file": str(summary)},
@@ -48,7 +49,7 @@ class ScientificReportTests(unittest.TestCase):
             self.assertEqual(_top_dge_events(results, 0.05)[0]["direction"], "up")
             self.assertEqual(
                 {row["method"] for row in _top_apa_events(results, 0.05)},
-                {"APA-A", "APA-B"},
+                {"APA-A", "APA-A2", "APA-B"},
             )
 
     def test_validated_apa_b_events_use_the_drimseq_primary_index(self):
@@ -135,6 +136,30 @@ class ScientificReportTests(unittest.TestCase):
                 ["contrast_id", "pas_id"], [{"contrast_id": contrast_id, "pas_id": "p1"}],
             )
 
+            apa_a2_dir = results / "06b_apa_a2_corrected" / "GRCm39" / "dexseq_a2"
+            apa_a2_sites = apa_a2_dir / f"{contrast_id}.apa_a2_sites.tsv"
+            apa_a2_genes = apa_a2_dir / f"{contrast_id}.apa_a2_genes.tsv"
+            write_tsv(apa_a2_sites, ["pas_id", "padj", "primary_site"], [
+                {"pas_id": "p1", "padj": "0.01", "primary_site": "true"},
+                {"pas_id": "p2", "padj": "0.02", "primary_site": "false"},
+                {"pas_id": "p3", "padj": "0.5", "primary_site": "false"},
+            ])
+            write_tsv(apa_a2_genes, ["gene_id", "gene_padj", "shift", "primary_gene"], [
+                {"gene_id": "g1", "gene_padj": "0.01", "shift": "distal", "primary_gene": "true"},
+                {"gene_id": "g2", "gene_padj": "0.02", "shift": "no_shift", "primary_gene": "false"},
+            ])
+            write_tsv(
+                apa_a2_dir / "result_index.tsv",
+                ["contrast_id", "result_file", "gene_summary_file", "tested_sites", "significant_sites", "primary_sites"],
+                [{"contrast_id": contrast_id, "result_file": str(apa_a2_sites),
+                  "gene_summary_file": str(apa_a2_genes), "tested_sites": "3",
+                  "significant_sites": "2", "primary_sites": "1"}],
+            )
+            write_tsv(
+                results / "06b_apa_a2_corrected" / "GRCm39" / "candidate_pcpa.tsv",
+                ["contrast_id", "pas_id"], [{"contrast_id": contrast_id, "pas_id": "p1"}],
+            )
+
             row = _contrast_summary(plan, results, [contrast])[0]
             self.assertEqual(row["dge_tested_genes"], 3)
             self.assertEqual((row["dge_significant"], row["dge_up"], row["dge_down"]), (2, 1, 1))
@@ -142,6 +167,10 @@ class ScientificReportTests(unittest.TestCase):
             self.assertEqual((row["apa_a_tested_genes"], row["apa_a_significant_genes"]), (2, 1))
             self.assertEqual((row["apa_a_distal_genes"], row["apa_a_proximal_genes"]), (1, 1))
             self.assertEqual(row["apa_a_pcpa"], 1)
+            self.assertEqual((row["apa_a2_tested_sites"], row["apa_a2_significant_sites"]), (3, 2))
+            self.assertEqual((row["apa_a2_primary_sites"], row["apa_a2_primary_genes"]), (1, 1))
+            self.assertEqual((row["apa_a2_distal_genes"], row["apa_a2_proximal_genes"]), (1, 0))
+            self.assertEqual(row["apa_a2_pcpa"], 1)
 
     def test_contrast_summary_rejects_stale_index_counts(self):
         with tempfile.TemporaryDirectory() as temporary:

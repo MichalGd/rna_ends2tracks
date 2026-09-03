@@ -29,7 +29,7 @@ jobs:
         run: |
           python -m pip install --force-reinstall --no-deps dist/*.whl
           cd /tmp
-          python -c 'from rnaends2tracks.paths import workflow_asset; assert workflow_asset("scripts/R/deseq2_c4.R").is_file(); assert workflow_asset("scripts/R/gene_set_enrichment.R").is_file(); assert workflow_asset("scripts/R/polyaseqtrap_quantseq_rev.R").is_file(); assert workflow_asset("scripts/build_pas_atlas.py").is_file(); assert workflow_asset("scripts/prepare_pas_sources.py").is_file(); assert workflow_asset("resources/quantseq_rev_adapters.fa").is_file(); assert workflow_asset("config/config.conf").is_file(); assert workflow_asset("config/apa_b_validation.example.json").is_file()'
+          python -c 'from rnaends2tracks.paths import workflow_asset; assert workflow_asset("scripts/R/deseq2_c4.R").is_file(); assert workflow_asset("scripts/R/dexseq_all_pairs_a2.R").is_file(); assert workflow_asset("scripts/R/gene_set_enrichment.R").is_file(); assert workflow_asset("scripts/R/polyaseqtrap_quantseq_rev.R").is_file(); assert workflow_asset("scripts/build_pas_atlas.py").is_file(); assert workflow_asset("scripts/prepare_pas_sources.py").is_file(); assert workflow_asset("resources/quantseq_rev_adapters.fa").is_file(); assert workflow_asset("config/config.conf").is_file(); assert workflow_asset("config/apa_b_validation.example.json").is_file()'
 
   shell-and-r-parse:
     runs-on: ubuntu-latest
@@ -48,10 +48,12 @@ jobs:
         shell: Rscript {0}
         run: |
           files <- list.files("scripts/R", pattern="[.]R$", full.names=TRUE)
-          stopifnot(length(files) == 6L)
+          stopifnot(length(files) == 7L)
           invisible(lapply(files, parse))
       - name: DEXSeq formula and serialization regression
         run: Rscript scripts/R/dexseq_all_pairs.R --self-test
+      - name: APA-A2 PAU and effect regression
+        run: Rscript scripts/R/dexseq_all_pairs_a2.R --self-test
 
   repository-contracts:
     runs-on: ubuntu-latest

@@ -81,6 +81,24 @@ class EnrichmentTests(unittest.TestCase):
             self.assertEqual(rows["g1"]["direction"], "any_apa;distal_shift")
             self.assertEqual(rows["g2"]["direction"], "any_pcpa;pcpa_decreased")
 
+    def test_apa_a2_preparation_honors_primary_gene_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / "a2.tsv"; target = root / "prepared.tsv"
+            write_tsv(
+                source,
+                ["gene_id", "gene_padj", "max_abs_delta_PAU", "signed_shift_score", "shift", "primary_gene"],
+                [
+                    {"gene_id": "g1", "gene_padj": "0.01", "max_abs_delta_PAU": "0.3",
+                     "signed_shift_score": "2", "shift": "distal", "primary_gene": "true"},
+                    {"gene_id": "g2", "gene_padj": "0.01", "max_abs_delta_PAU": "0.3",
+                     "signed_shift_score": "0", "shift": "no_shift", "primary_gene": "false"},
+                ],
+            )
+            self.assertEqual(_apa_gene_table(source, Path(""), target, "t_vs_c", 0.05, 0.1), (2, 1))
+            rows = {row["gene_id"]: row for row in read_tsv(target)}
+            self.assertEqual(rows["g1"]["direction"], "any_apa;distal_shift")
+            self.assertEqual(rows["g2"]["foreground"], "0")
+
     def test_provenance_dashboard_inventories_receipts_and_outputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); results = root / "results"; outdir = results / "10_reports"

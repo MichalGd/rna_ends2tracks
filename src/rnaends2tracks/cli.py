@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import __version__
+from .apa_a2 import apa_a2
 from .apa_b import apa_b
 from .apa_mcell import active_pas_stage, apa_statistics_stage, exact_ends_stage
 from .cleanup import clean_intermediates
@@ -35,7 +36,7 @@ from .tracks import make_c0_tracks, make_tracks
 
 STEPS = (
     "validate", "alignment", "rseqc", "c0_tracks", "exact_ends", "active_pas", "gene_expression",
-    "apa_a", "apa_b", "apa_comparison", "enrichment", "tracks", "report", "cleanup",
+    "apa_a", "apa_a2", "apa_b", "apa_comparison", "enrichment", "tracks", "report", "cleanup",
 )
 ALIASES = {
     "preprocess": "alignment", "early_tracks": "c0_tracks",
@@ -52,7 +53,7 @@ def _downstream_branch_sequences(runnable: list[str]) -> list[tuple[str, tuple[s
         remaining.remove("gene_expression")
         remaining.remove("tracks")
     branches.extend((candidate, (candidate,)) for candidate in remaining)
-    priority = {"apa_b": 0, "gene_expression_then_tracks": 1, "apa_a": 2}
+    priority = {"apa_b": 0, "gene_expression_then_tracks": 1, "apa_a": 2, "apa_a2": 3}
     branches.sort(key=lambda item: priority.get(item[0], 3))
     return branches
 
@@ -164,6 +165,7 @@ def _observed_stage_receipts(results: Path) -> dict[str, str]:
         "active_pas": results / "04_active_pas" / "run_receipt.json",
         "gene_expression": results / "05_gene_expression" / "run_receipt.json",
         "apa_a": results / "06_apa_a_mcell2019" / "run_receipt.json",
+        "apa_a2": results / "06b_apa_a2_corrected" / "run_receipt.json",
         "apa_b": results / "07_apa_b" / "run_receipt.json",
         "apa_comparison": results / "08_apa_comparison" / "run_receipt.json",
         "enrichment": results / "10_reports" / "enrichment_summary" / "run_receipt.json",
@@ -191,7 +193,7 @@ def _status_observations(results: Path, payload: dict[str, object]) -> dict[str,
     if not enrichment_jobs:
         enrichment_jobs = sum(
             _receipt_completed(path)
-            for root in ("05_gene_expression", "06_apa_a_mcell2019", "07_apa_b")
+            for root in ("05_gene_expression", "06_apa_a_mcell2019", "06b_apa_a2_corrected", "07_apa_b")
             for path in (results / root).rglob("enrichment/*/run_receipt.json")
         )
     outputs = {
@@ -201,6 +203,7 @@ def _status_observations(results: Path, payload: dict[str, object]) -> dict[str,
         "BigWigs": len(list((results / "09_tracks").rglob("*.bw"))),
         "DGE": len(list((results / "05_gene_expression").rglob("*.deseq2.tsv"))),
         "APA-A": len(list((results / "06_apa_a_mcell2019").rglob("*.dexseq.tsv"))),
+        "APA-A2": len(list((results / "06b_apa_a2_corrected").rglob("*.apa_a2_sites.tsv"))),
         "APA-B": len(list((results / "07_apa_b").rglob("*.drimseq_stager.tsv"))),
         "enrichment": enrichment_jobs,
         "reports": int((results / "10_reports" / "report.html").is_file()),
@@ -296,6 +299,7 @@ def execute(args: argparse.Namespace) -> int:
             "gene_expression": lambda: gene_expression(
                 plan, results, script_root, args.dry_run, "gene_expression" in forced),
             "apa_a": lambda: apa_statistics_stage(plan, results, script_root, args.dry_run, "apa_a" in forced),
+            "apa_a2": lambda: apa_a2(plan, results, script_root, args.dry_run, "apa_a2" in forced),
             "apa_b": lambda: apa_b(plan, results, script_root, args.dry_run, "apa_b" in forced),
             "apa_comparison": lambda: compare_apa(plan, results, force="apa_comparison" in forced),
             "enrichment": lambda: enrichment(
@@ -325,6 +329,8 @@ def execute(args: argparse.Namespace) -> int:
                 return "RUN_GENE_EXPRESSION=false"
             if step == "apa_a" and not modules.get("apa_a", True):
                 return "RUN_APA_A_MCELL2019=false"
+            if step == "apa_a2" and not modules.get("apa_a2", True):
+                return "RUN_APA_A2=false"
             if step == "apa_b" and not plan.project["apa_b"]["enabled"]:
                 return "RUN_APA_B=false"
             if step == "apa_comparison" and not requirements["apa_comparison"]:
@@ -338,11 +344,11 @@ def execute(args: argparse.Namespace) -> int:
             return None
 
         # Once active PAS are available, three independent branches can run:
-        # DGE followed by final tracks, APA-A, and APA-B.  Tracks consume the
+        # DGE followed by final tracks, APA-A, APA-A2, and APA-B. Tracks consume the
         # C4 size factors published by DGE but do not depend on either APA
         # statistical engine, so keeping them in the DGE branch avoids waiting
         # for the long APA-B critical path.
-        downstream_group = ("gene_expression", "apa_a", "apa_b", "tracks")
+        downstream_group = ("gene_expression", "apa_a", "apa_a2", "apa_b", "tracks")
         for step in steps:
             if step in processed:
                 continue

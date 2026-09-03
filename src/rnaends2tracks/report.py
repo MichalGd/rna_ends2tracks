@@ -21,7 +21,11 @@ CONTRAST_SUMMARY_FIELDS = [
     "dge_tested_genes", "dge_significant", "dge_up", "dge_down",
     "apa_a_tested_genes", "apa_a_significant_genes", "apa_a_tested_sites",
     "apa_a_significant_sites", "apa_a_distal_genes",
-    "apa_a_proximal_genes", "apa_a_pcpa", "apa_b_tested_sites",
+    "apa_a_proximal_genes", "apa_a_pcpa",
+    "apa_a2_tested_genes", "apa_a2_significant_genes", "apa_a2_primary_genes",
+    "apa_a2_tested_sites", "apa_a2_significant_sites", "apa_a2_primary_sites",
+    "apa_a2_distal_genes", "apa_a2_proximal_genes", "apa_a2_pcpa",
+    "apa_b_tested_sites",
     "apa_b_tested_genes", "apa_b_significant_genes", "apa_b_confirmed_sites",
     "apa_b_distal_genes", "apa_b_proximal_genes", "apa_b_pcpa", "apa_compared_sites",
     "apa_direction_agree", "apa_direction_disagree", "apa_direction_agreement_pct",
@@ -178,12 +182,17 @@ def _contrast_summary(
         apa_a_index = _index_by_contrast(
             results / "06_apa_a_mcell2019" / genome / "dexseq" / "result_index.tsv"
         )
+        apa_a2_index = _index_by_contrast(
+            results / "06b_apa_a2_corrected" / genome / "dexseq_a2" / "result_index.tsv"
+        )
         apa_b_index = _index_by_contrast(
             results / "07_apa_b" / genome / "drimseq" / "result_index.tsv"
         )
         apa_a_pcpa_path = results / "06_apa_a_mcell2019" / genome / "candidate_pcpa.tsv"
+        apa_a2_pcpa_path = results / "06b_apa_a2_corrected" / genome / "candidate_pcpa.tsv"
         apa_b_pcpa_path = results / "07_apa_b" / genome / "candidate_pcpa.tsv"
         apa_a_pcpa = _count_pcpa(apa_a_pcpa_path) if apa_a_pcpa_path.is_file() else None
+        apa_a2_pcpa = _count_pcpa(apa_a2_pcpa_path) if apa_a2_pcpa_path.is_file() else None
         apa_b_pcpa = _count_pcpa(apa_b_pcpa_path) if apa_b_pcpa_path.is_file() else None
         for contrast in genome_contrasts:
             contrast_id = contrast["contrast_id"]
@@ -207,6 +216,15 @@ def _contrast_summary(
                 "apa_a_distal_genes": "",
                 "apa_a_proximal_genes": "",
                 "apa_a_pcpa": "" if apa_a_pcpa is None else apa_a_pcpa[contrast_id],
+                "apa_a2_tested_sites": "",
+                "apa_a2_tested_genes": "",
+                "apa_a2_significant_genes": "",
+                "apa_a2_primary_genes": "",
+                "apa_a2_significant_sites": "",
+                "apa_a2_primary_sites": "",
+                "apa_a2_distal_genes": "",
+                "apa_a2_proximal_genes": "",
+                "apa_a2_pcpa": "" if apa_a2_pcpa is None else apa_a2_pcpa[contrast_id],
                 "apa_b_tested_sites": "",
                 "apa_b_tested_genes": "",
                 "apa_b_significant_genes": "",
@@ -251,6 +269,43 @@ def _contrast_summary(
                             for item in genes
                         ),
                     })
+            if contrast_id in apa_a2_index:
+                index = apa_a2_index[contrast_id]
+                sites = _required_rows(Path(index["result_file"]), "APA-A2 site result")
+                tested = len(sites)
+                significant = sum(
+                    _number(item.get("padj")) is not None
+                    and _number(item.get("padj")) <= fdr
+                    for item in sites
+                )
+                primary_sites = sum(item.get("primary_site", "").lower() == "true" for item in sites)
+                _require_index_count("APA-A2", contrast_id, index, "tested_sites", tested)
+                _require_index_count("APA-A2", contrast_id, index, "significant_sites", significant)
+                _require_index_count("APA-A2", contrast_id, index, "primary_sites", primary_sites)
+                genes = _required_rows(Path(index["gene_summary_file"]), "APA-A2 gene summary")
+                significant_genes = sum(
+                    _number(item.get("gene_padj")) is not None
+                    and _number(item.get("gene_padj")) <= fdr
+                    for item in genes
+                )
+                primary_genes = sum(item.get("primary_gene", "").lower() == "true" for item in genes)
+                _require_index_count("APA-A2", contrast_id, index, "tested_genes", len(genes))
+                _require_index_count("APA-A2", contrast_id, index, "significant_genes", significant_genes)
+                _require_index_count("APA-A2", contrast_id, index, "primary_genes", primary_genes)
+                shifts = Counter(
+                    item.get("shift", "") for item in genes
+                    if item.get("primary_gene", "").lower() == "true"
+                )
+                row.update({
+                    "apa_a2_tested_sites": tested,
+                    "apa_a2_significant_sites": significant,
+                    "apa_a2_primary_sites": primary_sites,
+                    "apa_a2_tested_genes": len(genes),
+                    "apa_a2_significant_genes": significant_genes,
+                    "apa_a2_primary_genes": primary_genes,
+                    "apa_a2_distal_genes": shifts["distal"],
+                    "apa_a2_proximal_genes": shifts["proximal"],
+                })
             if contrast_id in apa_b_index:
                 index = apa_b_index[contrast_id]
                 tested, confirmed = _tested_significant(
@@ -406,10 +461,11 @@ def _top_dge_events(results: Path, fdr: float, limit_per_contrast: int = 25) -> 
 def _top_apa_events(results: Path, fdr: float, limit_per_contrast: int = 25) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     definitions = (
-        ("APA-A", results / "06_apa_a_mcell2019", "significant_sites"),
-        ("APA-B", results / "07_apa_b", "confirmed_sites"),
+        ("APA-A", results / "06_apa_a_mcell2019", "significant_sites", ""),
+        ("APA-A2", results / "06b_apa_a2_corrected", "primary_sites", "primary_gene"),
+        ("APA-B", results / "07_apa_b", "confirmed_sites", ""),
     )
-    for method, root, site_field in definitions:
+    for method, root, site_field, required_flag in definitions:
         if not root.is_dir():
             continue
         pcpa_by_genome: dict[str, set[tuple[str, str]]] = {}
@@ -428,7 +484,8 @@ def _top_apa_events(results: Path, fdr: float, limit_per_contrast: int = 25) -> 
                 for row in _rows(summary):
                     padj = _number(row.get("gene_padj"))
                     effect = _number(row.get("max_abs_delta_PAU")) or 0.0
-                    if padj is not None and padj <= fdr:
+                    flag_ok = not required_flag or row.get(required_flag, "").lower() == "true"
+                    if padj is not None and padj <= fdr and flag_ok:
                         selected.append((padj, -abs(effect), row.get("gene_id", ""), row))
                 for _padj, _effect, _gene, row in sorted(
                     selected, key=lambda item: item[:3]
@@ -714,6 +771,7 @@ def _main_artifacts(results: Path, outdir: Path) -> list[dict[str, str]]:
     for root, label in (
         (results / "05_gene_expression", "DGE result index"),
         (results / "06_apa_a_mcell2019", "APA-A result index"),
+        (results / "06b_apa_a2_corrected", "APA-A2 result index"),
         (results / "07_apa_b", "APA-B result index"),
     ):
         for path in (sorted(root.rglob("result_index.tsv")) if root.is_dir() else []):
@@ -815,20 +873,22 @@ def make_report(
         results / directory / "run_receipt.json"
         for directory in (
             "02_alignment", "03_exact_ends", "04_active_pas", "05_gene_expression",
-            "06_apa_a_mcell2019", "07_apa_b", "08_apa_comparison", "09_tracks",
+            "06_apa_a_mcell2019", "06b_apa_a2_corrected", "07_apa_b", "08_apa_comparison", "09_tracks",
             "01_qc/rseqc",
         )
     )
     result_indexes = sorted((results / "05_gene_expression").rglob("result_index.tsv"))
     result_indexes.extend(sorted((results / "06_apa_a_mcell2019").rglob("result_index.tsv")))
+    result_indexes.extend(sorted((results / "06b_apa_a2_corrected").rglob("result_index.tsv")))
     result_indexes.extend(sorted((results / "07_apa_b").rglob("result_index.tsv")))
     inputs.extend(result_indexes)
     for index_path in result_indexes:
         for row in _rows(index_path):
-            for field in ("result_file", "shift_file", "gene_summary_file"):
+            for field in ("result_file", "shift_file", "gene_summary_file", "pair_delta_file", "audit_file"):
                 if row.get(field):
                     inputs.append(Path(row[field]))
     inputs.extend(sorted((results / "06_apa_a_mcell2019").rglob("candidate_pcpa.tsv")))
+    inputs.extend(sorted((results / "06b_apa_a2_corrected").rglob("candidate_pcpa.tsv")))
     inputs.extend(sorted((results / "07_apa_b").rglob("candidate_pcpa.tsv")))
     inputs.append(results / "08_apa_comparison" / "effect_concordance.tsv")
     inputs.extend(sorted((results / "02_alignment").rglob("*Log.final.out")))
@@ -881,7 +941,8 @@ def make_report(
     enrichment_enabled = bool(
         (enabled_modules.get("dge_enrichment", False) and enabled_modules.get("gene_expression", True))
         or (enabled_modules.get("apa_enrichment", False) and (
-            enabled_modules.get("apa_a", True) or plan.project.get("apa_b", {}).get("enabled", False)
+            enabled_modules.get("apa_a", True) or enabled_modules.get("apa_a2", True)
+            or plan.project.get("apa_b", {}).get("enabled", False)
         ))
     )
     modules = [
@@ -891,6 +952,7 @@ def make_report(
         ("active PAS", "04_active_pas", requirements["active_pas"]),
         ("gene expression", "05_gene_expression", enabled_modules.get("gene_expression", True)),
         ("APA-A", "06_apa_a_mcell2019", enabled_modules.get("apa_a", True)),
+        ("APA-A2 corrected", "06b_apa_a2_corrected", enabled_modules.get("apa_a2", True)),
         ("APA-B", "07_apa_b", plan.project.get("apa_b", {}).get("enabled", False)),
         ("APA comparison", "08_apa_comparison", requirements["apa_comparison"]),
         ("gene-set enrichment", "10_reports/enrichment_summary",
@@ -1032,14 +1094,15 @@ def make_report(
     ]
     lines += [
         "", "## Differential and APA summary", "",
-        "| Contrast | DGE significant | DGE up | DGE down | APA-A significant genes | APA-A significant sites | APA-B significant genes | APA-B confirmed sites | PCPA A/B | Agreement % |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Contrast | DGE significant | DGE up | DGE down | APA-A significant genes | APA-A significant sites | APA-A2 primary genes | APA-A2 primary sites | APA-B significant genes | APA-B confirmed sites | PCPA A/A2/B | A-B agreement % |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     lines.extend(
         f"| {row['contrast_id']} | {row['dge_significant']} | {row['dge_up']} | {row['dge_down']} | "
         f"{row['apa_a_significant_genes']} | {row['apa_a_significant_sites']} | "
+        f"{row['apa_a2_primary_genes']} | {row['apa_a2_primary_sites']} | "
         f"{row['apa_b_significant_genes']} | {row['apa_b_confirmed_sites']} | "
-        f"{row['apa_a_pcpa']}/{row['apa_b_pcpa']} | {row['apa_direction_agreement_pct']} |"
+        f"{row['apa_a_pcpa']}/{row['apa_a2_pcpa']}/{row['apa_b_pcpa']} | {row['apa_direction_agreement_pct']} |"
         for row in contrast_rows
     )
     lines += [
@@ -1186,7 +1249,8 @@ def make_report(
         "The complete DESeq2 tables remain linked in the output manifest.</p>",
         _html_table(dge_events, DGE_EVENT_FIELDS) if dge_events else "<p>No DGE gene passed the configured FDR.</p>",
         "<h3>Top APA gene-level events</h3>",
-        "<p>Up to 25 FDR-significant genes per method and contrast. APA-A and APA-B remain independent; "
+        "<p>Up to 25 FDR-significant genes per method and contrast. APA-A, APA-A2, and APA-B run independently; "
+        "APA-A2 additionally requires the configured minimum absolute raw-count PAU change for primary calls. "
         "candidate PCPA marks intragenic premature cleavage/polyadenylation candidates, not proven termination.</p>",
         _html_table(apa_events, APA_EVENT_FIELDS) if apa_events else "<p>No APA gene passed the configured FDR.</p>",
         "<h2 id='plots'>DGE exploratory and contrast plots</h2>",
@@ -1209,7 +1273,9 @@ def make_report(
         _image_gallery(outdir, enrichment_images),
         "<h2 id='apa-b'>APA-B validation and interpretation</h2>",
         f"<p><strong>{html.escape(apa_b_status)}</strong></p>", _html_table(apa_b_rows, ["property", "value"]),
-        "<p>APA-A and APA-B are independent analyses. Their catalogs are never merged; when both are validated, "
+        "<p>APA-A, APA-A2, and APA-B are independently switchable analyses. APA-A2 shares the condition-blind C3 "
+        "catalog with legacy APA-A but reruns DEXSeq and independently computes raw-count within-gene PAU effects. "
+        "APA-B retains its independently discovered catalog. APA-A and APA-B catalogs are never merged; when both are validated, "
         "the workflow reports proximity and effect-direction concordance separately.</p>",
         "<h3>Top validated APA-B gene-level events</h3>",
         _html_table(apa_b_gene_events, [

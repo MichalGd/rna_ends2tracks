@@ -32,12 +32,13 @@ class CliTests(unittest.TestCase):
 
     def test_downstream_scheduler_pipelines_tracks_after_dge_and_prioritizes_apa_b(self):
         branches = _downstream_branch_sequences([
-            "gene_expression", "apa_a", "apa_b", "tracks",
+            "gene_expression", "apa_a", "apa_a2", "apa_b", "tracks",
         ])
         self.assertEqual(branches, [
             ("apa_b", ("apa_b",)),
             ("gene_expression_then_tracks", ("gene_expression", "tracks")),
             ("apa_a", ("apa_a",)),
+            ("apa_a2", ("apa_a2",)),
         ])
 
     def test_status_counts_enrichment_jobs_and_completed_receipts(self):
@@ -88,6 +89,7 @@ class CliTests(unittest.TestCase):
             events = (root / "results" / "logs" / "events.jsonl").read_text(encoding="utf-8")
             self.assertIn('"module": "preprocess"', events)
             self.assertIn('"module": "c0_tracks"', events)
+            self.assertIn('"module": "apa_a2"', events)
             self.assertIn('"status": "dry_run"', events)
             master = (root / "results" / "rna_ends2tracks.log").read_text(encoding="utf-8")
             self.assertIn("[workflow] STARTED", master)

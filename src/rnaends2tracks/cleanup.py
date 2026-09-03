@@ -12,7 +12,7 @@ from .external import event
 from .receipts import receipt_valid, sha256, write_receipt
 
 
-SUPPORTED_CLEANUP_EVIDENCE = re.compile(r"^0[.]1[.]0a(?:9|10|11)(?:[.]post[0-9]+)?$")
+SUPPORTED_CLEANUP_EVIDENCE = re.compile(r"^0[.]1[.]0a(?:9|10|11|12)(?:[.]post[0-9]+)?$")
 
 
 def _safe_results_root(results: Path) -> Path:
@@ -126,6 +126,8 @@ def _require_successful_workflow(plan: RunPlan, root: Path) -> None:
         required.append("05_gene_expression")
     if modules.get("apa_a", True):
         required.append("06_apa_a_mcell2019")
+    if modules.get("apa_a2", True):
+        required.append("06b_apa_a2_corrected")
     if plan.project.get("apa_b", {}).get("enabled", False):
         required.append("07_apa_b")
     if requirements["apa_comparison"]:
@@ -139,7 +141,8 @@ def _require_successful_workflow(plan: RunPlan, root: Path) -> None:
     enrichment_enabled = bool(
         (modules.get("dge_enrichment", False) and modules.get("gene_expression", True))
         or (modules.get("apa_enrichment", False) and (
-            modules.get("apa_a", True) or plan.project.get("apa_b", {}).get("enabled", False)
+            modules.get("apa_a", True) or modules.get("apa_a2", True)
+            or plan.project.get("apa_b", {}).get("enabled", False)
         ))
     )
     if enrichment_enabled and not _successful_receipt(

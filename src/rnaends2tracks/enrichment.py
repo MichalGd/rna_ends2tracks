@@ -103,6 +103,8 @@ def _apa_gene_table(
         padj = _number(row.get("gene_padj"))
         delta = _number(row.get("max_abs_delta_PAU"))
         selected_apa = padj is not None and padj <= fdr and delta is not None and delta >= min_delta
+        if row.get("primary_gene", "").lower() in {"true", "false"}:
+            selected_apa = row["primary_gene"].lower() == "true"
         directions: list[str] = []
         if selected_apa:
             directions.append("any_apa")
@@ -200,10 +202,11 @@ def enrichment(
     modules = plan.project.get("modules", {})
     dge_enabled = bool(modules.get("dge_enrichment", True) and modules.get("gene_expression", True))
     apa_enabled = bool(modules.get("apa_enrichment", True) and modules.get("apa_a", True))
+    apa_a2_enabled = bool(modules.get("apa_enrichment", True) and modules.get("apa_a2", True))
     apa_b_enabled = bool(modules.get("apa_enrichment", True) and plan.project.get("apa_b", {}).get("enabled", False))
     log_dir = results / "logs"
     outroot = results / "10_reports" / "enrichment_summary"
-    if not (dge_enabled or apa_enabled or apa_b_enabled):
+    if not (dge_enabled or apa_enabled or apa_a2_enabled or apa_b_enabled):
         event(log_dir, "enrichment", "disabled", "DGE and APA enrichment are disabled")
         return
     if dry_run:
@@ -225,6 +228,8 @@ def enrichment(
             job_dir = results / "05_gene_expression" / genome / "enrichment" / contrast_id
         elif analysis_type == "apa_a":
             job_dir = results / "06_apa_a_mcell2019" / genome / "enrichment" / contrast_id
+        elif analysis_type == "apa_a2":
+            job_dir = results / "06b_apa_a2_corrected" / genome / "enrichment" / contrast_id
         else:
             job_dir = results / "07_apa_b" / genome / "enrichment" / contrast_id
         gene_table = job_dir / "prepared_gene_table.tsv"
@@ -296,6 +301,10 @@ def enrichment(
             pcpa = results / "06_apa_a_mcell2019" / genome / "candidate_pcpa.tsv"
             for row in _read(results / "06_apa_a_mcell2019" / genome / "dexseq" / "result_index.tsv"):
                 add_job("apa_a", genome, species, row["contrast_id"], Path(row["gene_summary_file"]), pcpa)
+        if apa_a2_enabled:
+            pcpa = results / "06b_apa_a2_corrected" / genome / "candidate_pcpa.tsv"
+            for row in _read(results / "06b_apa_a2_corrected" / genome / "dexseq_a2" / "result_index.tsv"):
+                add_job("apa_a2", genome, species, row["contrast_id"], Path(row["gene_summary_file"]), pcpa)
         if apa_b_enabled:
             pcpa = results / "07_apa_b" / genome / "candidate_pcpa.tsv"
             for row in _read(results / "07_apa_b" / genome / "drimseq" / "result_index.tsv"):
@@ -311,7 +320,8 @@ def enrichment(
     _write(index, rows, INDEX_FIELDS)
     module_signature = signature_for(signature_inputs, {
         "module": "enrichment", "settings": settings,
-        "dge_enabled": dge_enabled, "apa_enabled": apa_enabled, "apa_b_enabled": apa_b_enabled,
+        "dge_enabled": dge_enabled, "apa_enabled": apa_enabled,
+        "apa_a2_enabled": apa_a2_enabled, "apa_b_enabled": apa_b_enabled,
     })
     outputs = [index]
     for row in rows:
