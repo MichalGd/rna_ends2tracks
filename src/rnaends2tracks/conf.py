@@ -17,8 +17,9 @@ DEFAULTS: dict[str, str] = {
     "TMP_DIR": "",
     "RUN_GENE_EXPRESSION": "true",
     "RUN_APA_A_MCELL2019": "true",
+    "RUN_APA_A2": "true",
     # Preserve legacy configurations that predate explicit APA-B settings.
-    # New projects copy config/config.conf, where both APA methods are enabled
+    # New projects copy config/config.conf, where all three APA methods are enabled
     # for the audited site scope and guarded by an accepted manifest.
     "RUN_APA_B": "false",
     "APA_B_PILOT_ACCEPTED": "false",
@@ -115,6 +116,7 @@ DEFAULTS: dict[str, str] = {
     # Empty values preserve the legacy shared APA_CONTRAST_PARALLEL_JOBS
     # setting in existing project configurations.
     "APA_A_CONTRAST_PARALLEL_JOBS": "",
+    "APA_A2_CONTRAST_PARALLEL_JOBS": "",
     "APA_B_CONTRAST_PARALLEL_JOBS": "",
     "GENERATE_ALL_READ_TRACKS": "true",
     "GENERATE_EXACT_END_TRACKS": "true",
@@ -384,6 +386,7 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "modules": {
             "gene_expression": _bool(values, "RUN_GENE_EXPRESSION"),
             "apa_a": _bool(values, "RUN_APA_A_MCELL2019"),
+            "apa_a2": _bool(values, "RUN_APA_A2"),
             "apa_b": _bool(values, "RUN_APA_B"), "tracks": _bool(values, "RUN_TRACKS"),
             "rseqc": _bool(values, "RUN_RSEQC"),
             "dge_enrichment": _bool(values, "RUN_DGE_ENRICHMENT"),
@@ -411,6 +414,10 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
             "discovery_threshold_operator": values["PAS_DISCOVERY_THRESHOLD_OPERATOR"],
             "discovery_rounds": _int(values, "PAS_DISCOVERY_ROUNDS"),
             "gene_downstream_extension_nt": _int(values, "GENE_DOWNSTREAM_EXTENSION_NT", 0),
+        },
+        "apa_a2": {
+            "enabled": _bool(values, "RUN_APA_A2"),
+            "method": "independent_dexseq_raw_count_pau_v1",
         },
         "apa_b": {
             "enabled": _bool(values, "RUN_APA_B"), "pilot_accepted": _bool(values, "APA_B_PILOT_ACCEPTED"),
@@ -504,6 +511,9 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
                       "contrast_parallel_jobs": _int_or(
                           values, "APA_A_CONTRAST_PARALLEL_JOBS", "APA_CONTRAST_PARALLEL_JOBS"),
                       "contrast_threads": 1, "contrast_memory_gb": 16},
+            "apa_a2": {"contrast_parallel_jobs": _int_or(
+                          values, "APA_A2_CONTRAST_PARALLEL_JOBS", "APA_CONTRAST_PARALLEL_JOBS"),
+                       "contrast_threads": 1, "contrast_memory_gb": 16},
             "apa_b": {"engine_threads": _int(values, "APA_B_THREADS"), "engine_memory_gb": 24,
                       "endpoint_parallel_jobs": _int(values, "APA_B_ENDPOINT_PARALLEL_JOBS"),
                       "cluster_parallel_jobs": _int(values, "APA_B_CLUSTER_PARALLEL_JOBS"),

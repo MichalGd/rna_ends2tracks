@@ -12,7 +12,7 @@ The alignment BAM contains mapped primary `NH=1` alignments. SAM flags 0x4, 0x10
 
 ## Exact transcript ends
 
-QuantSeq REV Read 1 is antisense to the source transcript. A reverse genomic R1 alignment represents a transcript-plus molecule and its transcript 3′ coordinate is the rightmost aligned reference base (`reference_end-1`). A forward R1 alignment represents transcript-minus and uses `reference_start`. For paired libraries, both mates contribute their aligned blocks to conventional all-read coverage, which is normalized per mapped pair by counting R1 records. Split CIGAR blocks are honored so introns are not painted as covered sequence. R2 is explicitly excluded from C1/C1S cleavage-coordinate extraction in both independent APA methods. These tracks show aligned read blocks rather than an inferred insert span.
+QuantSeq REV Read 1 is antisense to the source transcript. A reverse genomic R1 alignment represents a transcript-plus molecule and its transcript 3′ coordinate is the rightmost aligned reference base (`reference_end-1`). A forward R1 alignment represents transcript-minus and uses `reference_start`. For paired libraries, both mates contribute their aligned blocks to conventional all-read coverage, which is normalized per mapped pair by counting R1 records. Split CIGAR blocks are honored so introns are not painted as covered sequence. R2 is explicitly excluded from the APA-A/APA-A2 C1/C1S coordinate stream and from APA-B cleavage-coordinate extraction. These tracks show aligned read blocks rather than an inferred insert span.
 
 The defining CIGAR side is checked for soft/hard clipping. Unclipped coordinates form C1; uncertain clipped records form C1S. Mapping-class, clipping and duplicate audits are retained. The end-analysis C0 universe means eligible end-defining molecules (R1 fragments in PE), not the number of mate alignments in a PE BAM. Required identity: `C0 = C1 + C1S`.
 
@@ -48,11 +48,11 @@ C4 sums C3 over uniquely assigned PAS per gene and is the primary raw-integer DE
 
 C5 reverse-stranded featureCounts exon counts are diagnostic only. Single-end projects count reads; paired-end projects use `-p --countReadPairs` and count fragments. The workflow reports per-sample log-count correlation and genes whose C4/C5 CPM ratio differs by at least fourfold. It never silently substitutes C5 for C4.
 
-## APA and shift direction
+## APA-A and corrected APA-A2
 
-Genes with at least two eligible active PAS are tested by DEXSeq using raw C3 counts. Ambiguous sites are excluded. If at least two sites are significant, the two lowest adjusted p-values are chosen, then absolute delta-PAU, mean normalized count and coordinate break ties. If exactly one is significant, its comparator is the nonzero other PAS with highest mean normalized usage, then pooled raw count and coordinate.
+Legacy APA-A is preserved unchanged. Genes with at least two eligible active PAS are tested by DEXSeq using raw C3 counts; ambiguous sites are excluded. Its historical effect and direction layer derives PAU from DEXSeq-normalized counts and classifies a two-site comparison. If at least two sites are significant, the two lowest adjusted p-values are chosen, then absolute delta-PAU, mean normalized count and coordinate break ties. If exactly one is significant, its comparator is the nonzero other PAS with highest mean normalized usage, then pooled raw count and coordinate. Proximal/distal order follows transcript direction and its zero-safe ratio direction uses a cross product.
 
-Proximal/distal order follows transcript direction. Zero-safe direction uses the cross product instead of adding a pseudocount. Both zero is `NA`, nonzero divided by zero is `Inf`, and a library with no classifiable proximal/distal use is reported as not classifiable.
+APA-A2 independently reruns the same DEXSeq hypothesis test on the shared, condition-blind C3 catalog. Its effect layer calculates within-gene PAS usage directly from raw C3 counts separately in every sample. Zero-total gene/sample observations remain `NA`. Unpaired delta-PAU is the difference between condition means; paired delta-PAU is calculated within each complete subject and averaged with equal pair weight. A primary site requires both site FDR and `MIN_ABS_DELTA_PAU`; a primary gene requires gene-level FDR and at least one primary site. Direction uses the PAU-weighted mean transcript-coordinate shift over the complete selected site set, with transcript-minus coordinates reversed. Every contrast publishes PAU-sum and within-gene effect-conservation audits. See [APA-A2 corrected analysis](12_apa_a2_corrected.md).
 
 ## Pairwise designs
 

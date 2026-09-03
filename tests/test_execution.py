@@ -39,7 +39,7 @@ class ProcessExecutionTests(unittest.TestCase):
         )
         downstream = next(row for row in rows if row["work_unit"] == "module_overlap")
         self.assertEqual(downstream["executor"], "thread_coordinator_with_nested_bounded_pools")
-        self.assertEqual(downstream["units"], 3)
+        self.assertEqual(downstream["units"], 4)
         self.assertEqual(downstream["max_threads"], 8)
         self.assertEqual(downstream["max_memory_gb"], 32)
         self.assertEqual(downstream["budget_status"], "PASS")

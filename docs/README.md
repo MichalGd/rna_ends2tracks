@@ -22,6 +22,7 @@ This index separates current user and administrator guidance from historical dev
 | RSeQC orientation, feature distribution and gene-body coverage | [RSeQC](rseqc.md) |
 | Track families, normalization and UCSC descriptors | [Tracks and outputs](tracks_and_outputs.md) |
 | DGE/APA enrichment, plots and final reporting | [Enrichment and reporting](enrichment_and_reporting.md) |
+| Corrected APA-A2 effects and outputs | [APA-A2 corrected analysis](12_apa_a2_corrected.md) |
 | APA-B and comparison with APA-A | [APA-B and comparison](11_apa_b_and_comparison.md) |
 | PAS atlas construction and provenance | [PAS atlases](pas_atlases.md) and [PAS atlas v1 design](PAS_ATLAS_V1_DESIGN.md) |
 | Scientific and implementation limits | [Limitations](limitations.md) |

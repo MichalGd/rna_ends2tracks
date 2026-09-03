@@ -23,7 +23,7 @@ Re-run the same command. Matching module, sample and contrast receipts skip comp
 
 ## Resource failure
 
-Preflight fails if any pool’s parallel jobs multiplied by per-job CPU/RAM exceeds `MAX_TOTAL_THREADS` or `MAX_TOTAL_MEMORY_GB`. It also checks the aggregate `downstream/module_overlap` peak when the DGE-then-final-tracks branch, APA-A, and APA-B are configured to overlap. Reduce method-specific parallel jobs first, reduce `DOWNSTREAM_MODULE_PARALLEL_JOBS`, or set `PARALLEL_DOWNSTREAM_MODULES=false`; reduce per-tool threads only when appropriate. Check `00_metadata/resource_plan.tsv` and `.checkpoints/timings/`.
+Preflight fails if any pool’s parallel jobs multiplied by per-job CPU/RAM exceeds `MAX_TOTAL_THREADS` or `MAX_TOTAL_MEMORY_GB`. It also checks the aggregate `downstream/module_overlap` peak when the DGE-then-final-tracks branch, APA-A, APA-A2, and APA-B are configured to overlap. Reduce method-specific parallel jobs first, reduce `DOWNSTREAM_MODULE_PARALLEL_JOBS`, or set `PARALLEL_DOWNSTREAM_MODULES=false`; reduce per-tool threads only when appropriate. Check `00_metadata/resource_plan.tsv` and `.checkpoints/timings/`.
 
 ## Orientation failure
 

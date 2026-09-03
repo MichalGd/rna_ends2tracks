@@ -139,10 +139,11 @@ Required columns include:
 - `SAMPLE_MERGE_PARALLEL_JOBS`;
 - `RSEQC_PARALLEL_JOBS` for independent per-sample annotation-aware QC;
 - `END_EXTRACTION_PARALLEL_JOBS`;
-- `DGE_CONTRAST_PARALLEL_JOBS`, `APA_A_CONTRAST_PARALLEL_JOBS`, and
-  `APA_B_CONTRAST_PARALLEL_JOBS` (the legacy shared APA setting remains a fallback);
+- `DGE_CONTRAST_PARALLEL_JOBS`, `APA_A_CONTRAST_PARALLEL_JOBS`,
+  `APA_A2_CONTRAST_PARALLEL_JOBS`, and `APA_B_CONTRAST_PARALLEL_JOBS`
+  (the legacy shared APA setting remains a fallback);
 - `PARALLEL_DOWNSTREAM_MODULES` and `DOWNSTREAM_MODULE_PARALLEL_JOBS` to overlap
-  the DGE-then-final-tracks branch with independent APA-A and APA-B branches after active-PAS discovery;
+  the DGE-then-final-tracks branch with independent APA-A, APA-A2, and APA-B branches after active-PAS discovery;
 - `ENRICHMENT_PARALLEL_JOBS` for independent method/contrast enrichment jobs;
 - `TRACK_PARALLEL_JOBS × TRACK_THREADS`.
 
@@ -175,7 +176,8 @@ results/
 ├── 03_exact_ends/             C1, C1S, C2 and C2R
 ├── 04_active_pas/             pooled CPM, PAS catalog, C3 and C4
 ├── 05_gene_expression/        C4 DESeq2 and C5 diagnostics
-├── 06_apa_a_mcell2019/        DEXSeq, shifts and differential PCPA
+├── 06_apa_a_mcell2019/        preserved DEXSeq, shifts and differential PCPA
+├── 06b_apa_a2_corrected/      independent corrected PAU effects and audits
 ├── 07_apa_b/                  validated-scope independent APA method
 ├── 08_apa_comparison/         optional independent-catalog concordance
 ├── 09_tracks/
@@ -186,7 +188,7 @@ results/
 
 `CLEANUP_INTERMEDIATES=true` is the default. Cleanup runs only after all enabled deliverable receipts and the report validate. It removes only an explicit allow-list (trimmed FASTQs, lane/all-alignment BAMs, temporary strand BAMs and bedGraphs), writes `provenance/cleanup/cleanup_manifest.tsv`, and preserves final BAMs, count universes, statistics, BigWigs, reports and provenance.
 
-`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; APA-A tested/significant sites, proximal/distal shifts and candidate PCPA; validated APA-B results; and APA-A/APA-B direction concordance and agreement percentage. Separate `differential_gene_expression_summary.tsv`, `alternative_polyadenylation_summary.tsv`, `top_differential_genes.tsv`, `top_apa_gene_events.tsv`, and `top_enrichment_terms.tsv` files make the major results directly sortable and reusable. The HTML embeds those top-result tables plus PCA, sample-distance, MA, volcano, database-specific enrichment, and RSeQC gene-body coverage plots; lists FastQ Screen execution status and per-database percentages, validated samples, and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC includes the underlying FastQ Screen and RSeQC results. See [FastQ Screen QC](docs/fastq_screen.md), [RSeQC QC](docs/rseqc.md), and [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
+`10_reports/report.html` is the scientific run summary. Its searchable table is also written as `10_reports/contrast_summary.tsv` and reports, per contrast, DGE tested/significant/up/down genes; preserved APA-A results; corrected APA-A2 significant and effect-qualified primary sites/genes, shifts and candidate PCPA; validated APA-B results; and the existing APA-A/APA-B independent-catalog concordance. Separate `differential_gene_expression_summary.tsv`, `alternative_polyadenylation_summary.tsv`, `top_differential_genes.tsv`, `top_apa_gene_events.tsv`, and `top_enrichment_terms.tsv` files make the major results directly sortable and reusable. The HTML embeds those top-result tables plus PCA, sample-distance, MA, volcano, database-specific enrichment, and RSeQC gene-body coverage plots; lists FastQ Screen execution status and per-database percentages, validated samples, and all BigWig collections; and links the complete QC/result indexes. `10_reports/provenance_dashboard/` records inputs, references, PAS atlases, receipts, environment packages, external-tool versions, and a complete output inventory. The report recounts source tables and stops if a DGE or APA index disagrees with its referenced results rather than displaying inconsistent totals. MultiQC includes the underlying FastQ Screen and RSeQC results. See [APA-A2 corrected analysis](docs/12_apa_a2_corrected.md), [FastQ Screen QC](docs/fastq_screen.md), [RSeQC QC](docs/rseqc.md), and [statistical plots, enrichment, provenance, and APA-B interpretation](docs/enrichment_and_reporting.md).
 
 Every report run also creates `10_reports/bigwig_collections.txt`, a one-column list grouped by track folder, and keeps every UCSC descriptor in `10_reports/ucsc_track_descriptors/`. That folder contains one file per signal family, a combined group-separated `UCSC_bigWig_tracks.oneline.txt`, its compatibility copy, and `UCSC_descriptor_validation.tsv`. Every descriptor is exactly one `track type=bigWig ...` line, uses a collection-specific color and optional `negateValues=on` for transcript-minus tracks, and must pass the built-in UCSC syntax contract before report publication. Set `UCSC_BIGDATA_URL_PREFIX` to the public directory containing a flat copy of the BigWigs; do not use Markdown link syntax in `config.conf`.
 
@@ -195,7 +197,7 @@ Every report run also creates `10_reports/bigwig_collections.txt`, a one-column 
 Production releases are installed side-by-side. Installing a new environment does not modify a running older release; promotion changes one stable symlink atomically after tests pass.
 
 ```bash
-bash scripts/bash/install_release.sh --tag v0.1.0-alpha.11.post3
+bash scripts/bash/install_release.sh --tag v0.1.0-alpha.12
 ```
 
 See [server installation](docs/server_installation.md) and [recovery/troubleshooting](docs/recovery_and_troubleshooting.md).
@@ -208,4 +210,4 @@ Start with the [shared-server quick start](docs/01_quick_start.md), [workflow st
 
 APA-B has a repository-owned, pinned PolyAseqTrap/DeepIP QuantSeq REV adapter and a separate immutable environment. It clusters genome-wide transcript 3′ endpoints with PolyAseqTrap and applies the official species-specific DeepIP model, so internal-exonic and intronic candidate PCPA sites are eligible even far from an annotated gene end.
 
-APA-B is implemented, but it is **validation-scope gated**, not universally authorized. New projects created from the audited `biolserv` template run both APA-A and APA-B by default because the GRCh38 and GRCm39 QuantSeq REV V2 single-end deployments have passed their synthetic and real-data pilots and the template selects their combined accepted manifest. Set either method's `RUN_*` switch to `false` to disable it. Paired-end APA-B requires its own matching accepted real-data validation and otherwise fails safely during configuration validation; it does not inherit the single-end acceptance. No project user activates the APA-B environment manually. APA-A and APA-B catalogs are never merged; comparison is a separate proximity/effect-concordance output. See [APA-B and comparison](docs/11_apa_b_and_comparison.md) and the [pilot contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md).
+APA-B is implemented, but it is **validation-scope gated**, not universally authorized. New projects created from the audited `biolserv` template run preserved APA-A, corrected APA-A2, and APA-B by default because the GRCh38 and GRCm39 QuantSeq REV V2 single-end APA-B deployments have passed their synthetic and real-data pilots and the template selects their combined accepted manifest. Set `RUN_APA_A_MCELL2019`, `RUN_APA_A2`, or `RUN_APA_B` to `false` to disable each method independently. Paired-end APA-B requires its own matching accepted real-data validation and otherwise fails safely during configuration validation; it does not inherit the single-end acceptance. No project user activates the APA-B environment manually. APA-A2 shares C3 with APA-A but reruns the statistical model and effect layer; APA-B retains an independently discovered catalog. APA-A and APA-B catalogs are never merged; comparison remains a separate proximity/effect-concordance output. See [APA-A2 corrected analysis](docs/12_apa_a2_corrected.md), [APA-B and comparison](docs/11_apa_b_and_comparison.md), and the [pilot contract](docs/POLYASEQTRAP_ADAPTER_CONTRACT.md).

@@ -11,5 +11,6 @@
 - Intragenic PAS are candidate PCPA/premature termination events. Confirmation needs orthogonal evidence such as nascent transcription, long-read RNA or validated isoform assays.
 - Ambiguous multi-gene PAS are excluded from statistical matrices by default. This is conservative but can reduce sensitivity in overlapping loci.
 - APA-B uses a separately pinned PolyAseqTrap/DeepIP environment and is validation-scope gated. The audited `biolserv` GRCh38/GRCm39 QuantSeq REV V2 single-end scope is accepted; other assemblies or protocols, including paired-end, require their own real-data acceptance. Its results are independent and compared only after both branches complete; it is not a fallback for APA-A.
+- APA-A2 corrects effect estimation and shift classification but intentionally shares APA-A's condition-blind C3 site catalog. It is an independent statistical run, not an independent PAS-discovery method. Retain APA-B when discovery-method independence is required.
 - Legacy accepted APA-B manifests created before the protocol-list field are interpreted narrowly as QuantSeq REV V2 SE only. They do not authorize PE execution; each PE protocol requires a reviewed real-PE canary.
 - Human GRCh38/GENCODE v42 and mouse GRCm39/GENCODE vM31 are the initial validated profiles. Other assemblies/releases require a new synchronized reference and PAS-atlas profile.

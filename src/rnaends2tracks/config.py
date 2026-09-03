@@ -83,6 +83,7 @@ def workflow_requirements(project: dict[str, Any]) -> dict[str, bool]:
     needs_active_pas = bool(
         modules.get("gene_expression", True)
         or modules.get("apa_a", True)
+        or modules.get("apa_a2", True)
         or families.get("active_pas", False)
         or (
             families.get("filtered_ends", False)
@@ -845,6 +846,7 @@ def write_plan(plan: RunPlan, outdir: str | Path) -> None:
     modules = plan.project.get("modules", {})
     enrichment_branches = int(bool(modules.get("dge_enrichment", False) and modules.get("gene_expression", True)))
     enrichment_branches += int(bool(modules.get("apa_enrichment", False) and modules.get("apa_a", True)))
+    enrichment_branches += int(bool(modules.get("apa_enrichment", False) and modules.get("apa_a2", True)))
     enrichment_branches += int(bool(
         modules.get("apa_enrichment", False) and plan.project.get("apa_b", {}).get("enabled", False)
     ))

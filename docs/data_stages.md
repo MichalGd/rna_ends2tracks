@@ -9,7 +9,7 @@ The `C` labels are workflow-specific shorthand for **count universes**. They are
 | **C1S** | uncertain clipped-end counts | Eligible C0 alignments with soft/hard clipping at the side needed to define the exact 3′ coordinate | Separate QC; excluded from exact PAS calling |
 | **C2** | filtered exact-end counts | C1 ends that pass the internal-priming mask, plus masked ends rescued by an assembly-matched annotated transcript end or PAS atlas | Condition-blind active-PAS discovery and filtered-end tracks |
 | **C2R** | internal-priming rejects | C1 ends rejected by the A/T-rich internal-priming rule and not rescued | Diagnostic reject tracks; excluded from DGE and APA |
-| **C3** | active-PAS counts | C2 ends counted at most once in the final non-overlapping, project-wide active-PAS intervals | PAS usage matrix, APA tests, and active-PAS tracks |
+| **C3** | active-PAS counts | C2 ends counted at most once in the final non-overlapping, project-wide active-PAS intervals | PAS usage matrix for APA-A and APA-A2, gene counts, and active-PAS tracks |
 | **C4** | active-PAS gene counts | C3 counts summed per gene over uniquely assigned PAS | Primary raw-integer gene-expression matrix and normalization factors |
 | **C5** | conventional exon-count diagnostic | Reverse-stranded featureCounts exon-overlap counts from C0 BAMs | Diagnostic comparison with C4; never substituted for C4 |
 
@@ -25,6 +25,11 @@ C4 = gene-wise sums of uniquely assigned C3
 ```
 
 APA-B may reuse receipt-validated C1 and C1S as an execution optimization. It adds the two tables back together, verifies the recorded `C0 = C1 + C1S` identity and source receipt, and therefore reconstructs the same raw endpoint universe that its BAM reader would produce. The exact-end audit also records the duplicate-flagged C0 count; reads remain retained because this is a no-UMI workflow. This does not reuse C2, active PAS, gene assignments, or APA-A statistics; PolyAseqTrap/DeepIP discovery remains an independent method.
+
+APA-A2 starts from the same condition-blind C3 matrix as legacy APA-A so that
+its corrected effect estimates are directly comparable. It reruns DEXSeq and
+does not read APA-A result files. This is statistical-module independence, not
+independent PAS discovery; APA-B supplies the independent discovery catalog.
 
 C3 can be smaller than C2 because filtered ends outside the discovered active-PAS intervals are not assigned to C3. Ambiguous, antisense, and unassigned C3 sites can remain in catalogs and tracks but are excluded from C4.
 
