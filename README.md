@@ -1,5 +1,7 @@
 # rna_ends2tracks
 
+**2.0:** primary DGE uses bounded extended-exon counts, independent of PAS discovery, with separately reported stringent and relaxed DE/ORA and one shared ranked GSEA. Legacy C4 DGE is opt-in. VST distance heatmaps cluster samples by expression distance. See [2.0 release and deployment](docs/release_2_0.md) and [the method, configuration and BAM-reuse guide](docs/gene_expression_alpha13.md). Use a separate output directory when comparing with a completed analysis.
+
 `rna_ends2tracks` is a config-driven workflow for Lexogen QuantSeq REV V2 single-end or paired-end data without UMIs. It performs gene-expression analysis, Mcell2019-style polyadenylation-site discovery and APA testing, creates strand-specific browser tracks, and supports GRCh38 and GRCm39—even in one samplesheet, with each genome analyzed independently.
 
 The normal interface deliberately resembles `ATACseq2tracks`:
@@ -43,7 +45,12 @@ flowchart TD
     C3 --> ASSIGN[Same-strand gene assignment plus 6 kb]
     ASSIGN --> C4[C4 unique-assignment gene sums]
     C0 --> C5[C5 reverse-stranded featureCounts diagnostic]
-    C4 --> DGE[Pairwise DESeq2 DGE]
+    C4 -. optional legacy .-> LEGACY[Legacy C4 DESeq2]
+    C0 --> GEX[Original exon union plus bounded 3-prime extension]
+    GEX --> DGE[Depth-aware filter and shared DESeq2 fit]
+    DGE --> STRICT[Stringent minimum-effect DE and ORA]
+    DGE --> RELAXED[Relaxed zero-null DE and ORA]
+    DGE --> GSEA[Shared ordinary-Wald ranked GSEA]
     C3 --> APA[Pairwise DEXSeq APA and shift direction]
     C4 --> SF[Global DESeq2 and robust-CPM factors]
     C0TRACKS --> TRACKS[Combined strand-specific track index]
@@ -70,7 +77,7 @@ flowchart TD
 - A summit at BED position `[p,p+1)` receives the 30-nt interval `[p-14,p+16)` (clipped only at chromosome boundaries).
 - Ambiguous multi-gene PAS remain in catalogs/tracks but are excluded from C4 and APA statistics.
 - Intragenic intronic and non-terminal-exonic PAS are retained as candidate premature cleavage/polyadenylation events.
-- C4 active-PAS gene sums are primary DGE. C5 featureCounts values are diagnostic only.
+- Primary DGE uses independent extended-exon counts with depth-aware filtering. Legacy C4 DGE and its C5 diagnostic remain selectable; C4 factors still normalize PAS-derived tracks.
 
 The `C` labels mean workflow-specific **count universes**, not standard RNA-seq terms. C1S and C2R are side branches, while C5 is an independent diagnostic. See [C0-C5 data stages](docs/data_stages.md), [methods](docs/methods.md), [PAS atlases](docs/pas_atlases.md), and [limitations](docs/limitations.md).
 
@@ -175,7 +182,7 @@ results/
 ├── 02_alignment/              C0 BAMs and orientation audit
 ├── 03_exact_ends/             C1, C1S, C2 and C2R
 ├── 04_active_pas/             pooled CPM, PAS catalog, C3 and C4
-├── 05_gene_expression/        C4 DESeq2 and C5 diagnostics
+├── 05_gene_expression/        extended-exon DE; optional legacy C4/C5
 ├── 06_apa_a_mcell2019/        preserved DEXSeq, shifts and differential PCPA
 ├── 06b_apa_a2_corrected/      independent corrected PAU effects and audits
 ├── 07_apa_b/                  validated-scope independent APA method

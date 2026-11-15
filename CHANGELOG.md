@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 2.0.0 - pending publication
+
+- Adopt the requested 2.0 release name for the alpha13.post1 implementation already verified on the shared server. Package/CLI/citation version is `2.0.0`; the Git tag is `v2.0.0`. Quantification, differential-expression/enrichment settings and clustered VST plots retain their alpha13.post1 definitions.
+- Keep a small, versioned workflow-code layer on the SSD while reusing the installed shared dependency environment. No dependency upgrades are required for this promotion.
+- Recognize alpha13.post1 completion receipts only when their original signatures and output integrity checks pass. Add the 2.0 release to cleanup evidence and accept stable release tags in the generic installer.
+
+## 0.1.0-alpha.13.post1 - 2026-11-15 (local release candidate)
+
+- Order both axes of the VST sample-distance heatmap by complete-linkage hierarchical clustering of the original Euclidean distances. Apply this to extended-exon and legacy C4 QC, put matching samples on the top-left diagonal, and scale figure dimensions for sample count. Add a utility to redraw existing plots from saved distance tables. Count matrices, distances, filtering and differential-expression calculations are unchanged. No additional dependencies are required.
+
+## 0.1.0-alpha.13 - 2026-11-15 (local release candidate)
+
+- Default to PAS-independent exon-union counting with bounded 6-kb 3-prime extension, same-strand gene/TSS protection, versioned SAF annotation and assignment audits. Preserve legacy C4 DESeq2 unchanged as an optional method.
+- Add per-contrast depth-aware filterByExpr (5 counts at median depth, 15 total), a shared DESeq2 fit, formal minimum-effect and ordinary zero-null tests. Both modes default on and have separate outputs and ORA; shared GSEA uses the ordinary Wald ranking once.
+- Separate ORA/GSEA and directional summaries, record mode/universe/mapping provenance, and bundle new expression figures and linked tables for offline reports. Preserve the existing portable-figure work.
+- Add read-only reuse of final C0 BAMs into a separate expression output tree, with no FASTQ/alignment restart. Keep large outputs and expression/enrichment temporaries under configured locations. Add edgeR to the versioned environment.
+- Verify annotation/counting contracts, statistical tests and report/routing fixtures. Correct Windows process-status probing to query rather than send `os.kill(pid, 0)`, and use portable enrichment timing filenames.
+
 ## 0.1.0-alpha.12.post1 - 2026-09-03
 
 - Point the bundled new-project configuration and current documentation to the

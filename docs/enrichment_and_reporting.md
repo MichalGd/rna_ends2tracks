@@ -1,8 +1,24 @@
 # Statistical plots, enrichment, provenance, and APA-B interpretation
 
+Alpha13 makes `extended_exons_v1` the default DGE method. See [gene expression in alpha13](gene_expression_alpha13.md) for its annotation, depth-aware filter, stringent/relaxed tests, shared GSEA, separate outputs and read-only BAM reuse. The C4 descriptions below apply to the optional legacy branch. New-method linked tables, as well as figures, are bundled under `10_reports/assets/`; legacy source TSV links retain their historical locations. ORA and signed GSEA are now displayed separately, with directional term selection.
+
 ## What the workflow produces
 
-The primary C4 DESeq2 analysis writes variance-stabilized PCA coordinates, a PCA figure, a sample-distance matrix and heatmap. Every contrast writes its complete DESeq2 table, MA plot, and volcano plot in PDF and PNG. PNG files are embedded in `10_reports/report.html`; PDF and source TSV files remain linked for publication-quality review.
+The primary C4 DESeq2 analysis writes variance-stabilized PCA coordinates, a PCA figure, a sample-distance matrix and heatmap. Every contrast writes its complete DESeq2 table, MA plot, and volcano plot in PDF and PNG. Figures displayed in `10_reports/report.html` are copied into `10_reports/assets/figures/`, including the RSeQC SVG and enrichment PNGs. Download the complete `10_reports` folder to view these figures offline. PDF and source TSV links still refer to their analysis folders.
+
+`report_image_assets.json` records each figure's source, label, portable asset path, size and SHA-256. Identical figure contents share one copied asset. Assets are included in the report receipt, so a missing or damaged copy invalidates the cached report. The figure-layout version also invalidates receipts from the older external-link layout.
+
+### Existing reports with broken images after download
+
+Older reports use sibling links such as `../05_gene_expression/...png` and `../01_qc/rseqc/gene_body_coverage.svg`. For a DGE-only run, downloading `05_gene_expression` and `01_qc/rseqc` alongside `10_reports` restores those figures. Add `01_qc/multiqc` to follow its detailed QC-report link. Preserve the folder names and relative layout; no BAMs or trimmed FASTQs are needed for the figures. Enabled APA enrichment can additionally reference its corresponding `06_apa_a_mcell2019`, `06b_apa_a2_corrected` or `07_apa_b` folder.
+
+Alternatively, run the standalone `src/rnaends2tracks/report_assets.py` on the server while the original figures are accessible:
+
+```bash
+python3 report_assets.py --report /path/to/results/10_reports/report.html
+```
+
+It creates `report.portable.html`, `report.portable.assets.json` and `assets/figures/` within the same `10_reports` folder. Download that folder and open `report.portable.html`. It copies only displayed image files and updates their figure links, without rerunning any analysis or changing `report.html`, scientific tables, configuration or existing receipts. Non-figure links to detailed analysis files and BigWigs still require those files. Run this repair separately for each finished species report; there is no need to change an active workflow installation.
 
 Gene-set interpretation is a separate workflow stage after DGE and APA statistics. It never changes a DGE or APA result. The stage prepares one row per tested gene, then runs:
 

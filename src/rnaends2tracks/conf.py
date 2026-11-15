@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import math
 import shlex
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,18 @@ ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)[ \t]*=[ \t]*(.*)$")
 
 DEFAULTS: dict[str, str] = {
     "TMP_DIR": "",
+    "INPUT_MODE": "fastq",
+    "ALIGNMENT_SOURCE_DIR": "",
+    "DGE_METHODS": "extended_exons_v1",
+    "DGE_PRIMARY_METHOD": "extended_exons_v1",
+    "GEX_EXTENSION_MAX_NT": "6000",
+    "GEX_TSS_BUFFER_NT": "2000",
+    "GEX_FILTER_METHOD": "filterByExpr",
+    "GEX_MIN_COUNT": "5",
+    "GEX_MIN_TOTAL_COUNT": "15",
+    "RUN_DGE_STRINGENT": "true",
+    "RUN_DGE_RELAXED": "true",
+    "DGE_STRINGENT_LFC_THRESHOLD": "1.0",
     "RUN_GENE_EXPRESSION": "true",
     "RUN_APA_A_MCELL2019": "true",
     "RUN_APA_A2": "true",
@@ -231,7 +244,7 @@ def _positive_float(values: dict[str, str], key: str) -> float:
         value = float(values[key])
     except ValueError as exc:
         raise ConfError(f"{key} must be numeric") from exc
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ConfError(f"{key} must be > 0")
     return value
 
@@ -257,10 +270,12 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
     values = read_conf(path)
     base = Path(values["_CONFIG_PATH"]).parent
     for key, accepted in {
+        "INPUT_MODE": {"fastq", "bam"},
+        "GEX_FILTER_METHOD": {"filterbyexpr"},
         "LIBRARY_LAYOUT": {"single_end", "se", "paired_end", "pe"},
         "MAPPING_POLICY": {"unique_primary"},
         "END_SOFT_CLIP_POLICY": {"exclude_and_report"},
-        "PAIRING_MODE": {"auto", "none", "required"},
+        "PAIRING_MODE": {"auto", "none", "required", "unpaired"},
         "INCOMPLETE_PAIR_ACTION": {"error", "unpaired"},
         "AMBIGUOUS_GENE_POLICY": {"exclude_statistics"},
         "PAS_MASK_RESCUE_TIER": {"core", "core_plus_rescue"},
@@ -270,6 +285,24 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
     }.items():
         if values[key].lower() not in accepted:
             raise ConfError(f"Unsupported {key}: {values[key]}")
+    if values["PAIRING_MODE"].lower() == "unpaired":
+        values["PAIRING_MODE"] = "none"
+    methods = [value.strip() for value in values["DGE_METHODS"].split(",") if value.strip()]
+    if not methods or len(set(methods)) != len(methods) or set(methods) - {"extended_exons_v1", "legacy_c4"}:
+        raise ConfError("DGE_METHODS must contain extended_exons_v1 and/or legacy_c4 once each")
+    if values["DGE_PRIMARY_METHOD"] not in methods:
+        raise ConfError("DGE_PRIMARY_METHOD must be enabled in DGE_METHODS")
+    if values["INPUT_MODE"].lower() == "bam":
+        if not values["ALIGNMENT_SOURCE_DIR"]:
+            raise ConfError("INPUT_MODE=bam requires ALIGNMENT_SOURCE_DIR")
+        # The first BAM-input interface is deliberately expression-only: other
+        # modules still use their established in-output BAM/PAS contracts.
+        if any(_bool(values, key) for key in (
+            "RUN_APA_A_MCELL2019", "RUN_APA_A2", "RUN_APA_B", "RUN_RSEQC", "RUN_TRACKS",
+        )) or "legacy_c4" in methods:
+            raise ConfError("INPUT_MODE=bam requires new DGE only, with APA, RSeQC and tracks disabled")
+        if _bool(values, "CLEANUP_INTERMEDIATES"):
+            raise ConfError("INPUT_MODE=bam requires CLEANUP_INTERMEDIATES=false to protect external inputs")
     if _int(values, "PAS_DISCOVERY_WINDOW_NT") != 30 or _int(values, "PAS_DISCOVERY_ROUNDS") != 2:
         raise ConfError("Faithful Mcell2019 mode requires 30-nt windows and exactly two discovery rounds")
     if _bool(values, "UMI_PRESENT"):
@@ -358,6 +391,19 @@ def project_from_conf(path: str | Path) -> tuple[dict[str, Any], str]:
         "project_id": values["PROJECT_ID"],
         "output_dir": _path(values["OUTPUT_DIR"], base),
         "tmp_dir": _path(values["TMP_DIR"], base),
+        "input_mode": values["INPUT_MODE"].lower(),
+        "alignment_source_dir": _path(values["ALIGNMENT_SOURCE_DIR"], base),
+        "gene_expression": {
+            "methods": methods, "primary_method": values["DGE_PRIMARY_METHOD"],
+            "extension_max_nt": _int(values, "GEX_EXTENSION_MAX_NT", 0),
+            "tss_buffer_nt": _int(values, "GEX_TSS_BUFFER_NT", 0),
+            "filter_method": "filterByExpr",
+            "min_count": _int(values, "GEX_MIN_COUNT"),
+            "min_total_count": _int(values, "GEX_MIN_TOTAL_COUNT"),
+            "stringent": _bool(values, "RUN_DGE_STRINGENT"),
+            "relaxed": _bool(values, "RUN_DGE_RELAXED"),
+            "lfc_threshold": _positive_float(values, "DGE_STRINGENT_LFC_THRESHOLD"),
+        },
         "condition_order": condition_order,
         "design": values["DESIGN"],
         "protocol": {

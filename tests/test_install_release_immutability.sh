@@ -8,7 +8,18 @@ INSTALLER="$PROJECT_ROOT/scripts/bash/install_release.sh"
 # shellcheck disable=SC2016
 grep -Fq 'find "$ENV_PREFIX" ! -type l -perm /222 -print -quit' "$INSTALLER"
 grep -Fq 'bash scripts/bash/write_versioned_launcher.sh' "$INSTALLER"
-grep -Fq '([.]post[0-9]+)?$' "$INSTALLER"
+# Tag parsing must support the stable 2.0 name while retaining historical alphas.
+# The deliberately absent Mamba path stops before any install/network action.
+ABSENT_MAMBA="/rnaends2tracks-test-no-such-mamba-$$"
+[[ ! -e "$ABSENT_MAMBA" ]] || exit 1
+for tag in v2.0.0 v0.1.0-alpha.13.post1; do
+  result="$(bash "$INSTALLER" --tag "$tag" --mamba "$ABSENT_MAMBA" 2>&1 || true)"
+  grep -Fq 'Mamba is not executable:' <<< "$result"
+done
+for tag in v2.0 v2.0.0garbage v2.0.0/other; do
+  result="$(bash "$INSTALLER" --tag "$tag" --mamba "$ABSENT_MAMBA" 2>&1 || true)"
+  grep -Fq 'Unexpected release tag:' <<< "$result"
+done
 # This also asserts literal installer source; $ENV_PREFIX must not expand here.
 # shellcheck disable=SC2016
 if grep -Fq 'ln -s "$ENV_PREFIX/bin/rna-ends2tracks"' "$INSTALLER"; then

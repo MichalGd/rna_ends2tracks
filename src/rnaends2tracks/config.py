@@ -16,6 +16,7 @@ import yaml
 
 from .conf import ConfError, project_from_conf
 from .execution import resolve_resources, write_resource_plan
+from .expression_methods import expression_methods
 
 
 class ConfigError(ValueError):
@@ -81,7 +82,7 @@ def workflow_requirements(project: dict[str, Any]) -> dict[str, bool]:
     families = tracks.get("families", {}) if modules.get("tracks", True) else {}
     normalizations = tracks.get("normalizations", {})
     needs_active_pas = bool(
-        modules.get("gene_expression", True)
+        (modules.get("gene_expression", True) and "legacy_c4" in expression_methods(project))
         or modules.get("apa_a", True)
         or modules.get("apa_a2", True)
         or families.get("active_pas", False)
@@ -709,7 +710,8 @@ def build_conf_plan(config_path: str | Path, check_inputs: bool = True) -> RunPl
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
     project["_warnings"] = resource_warnings
-    rows = load_samplesheet(samplesheet_path, check_fastqs=check_inputs)
+    bam_input = project.get("input_mode") == "bam"
+    rows = load_samplesheet(samplesheet_path, check_fastqs=check_inputs and not bam_input)
     configured_layout = _normalize_layout(str(project["protocol"].get("library_layout", "SE")))
     profile = _normalize_protocol(str(project["protocol"]["profile"]), configured_layout)
     project["protocol"]["profile"] = profile
@@ -740,10 +742,25 @@ def build_conf_plan(config_path: str | Path, check_inputs: bool = True) -> RunPl
     raw_references = project["references"]
     for genome in observed_genomes:
         raw = raw_references.get(genome)
-        if not isinstance(raw, dict) or not all(raw.get(key) for key in ("fasta", "gtf", "star_index", "chrom_sizes", "pas_atlas")):
+        if bam_input:
+            if not isinstance(raw, dict) or not all(raw.get(key) for key in ("gtf", "chrom_sizes")):
+                raise ConfigError(f"BAM input requires GTF and chromosome sizes for {genome}")
+            references[genome] = dict(raw)
+            if check_inputs:
+                for key in ("gtf", "chrom_sizes"):
+                    path = Path(raw[key])
+                    if not path.is_file():
+                        raise ConfigError(f"Missing {key}: {path}")
+                    references[genome][key + "_sha256"] = _sha256_file(path)
+            continue
+        needs_pas = workflow_requirements(project)["active_pas"]
+        keys = ("fasta", "gtf", "star_index", "chrom_sizes") + (("pas_atlas",) if needs_pas else ())
+        if not isinstance(raw, dict) or not all(raw.get(key) for key in keys):
             raise ConfigError(f"Complete reference and PAS-atlas paths are required for observed genome {genome}")
+        if not needs_pas:
+            raw = {key: value for key, value in raw.items() if key != "pas_atlas"}
         references[genome] = load_reference({**project, "reference": raw}, check_files=check_inputs)
-        if check_inputs and not Path(references[genome]["pas_atlas"]).is_dir():
+        if check_inputs and needs_pas and not Path(references[genome]["pas_atlas"]).is_dir():
             raise ConfigError(
                 f"Normal alpha.6 runs require a versioned PAS-atlas directory for {genome}, not a standalone BED"
             )
@@ -792,6 +809,12 @@ def build_conf_plan(config_path: str | Path, check_inputs: bool = True) -> RunPl
                 "message": f"{genome}: STAR sjdbOverhang={observed}; maximum read length suggests {expected}",
             })
     _validate_apa_b_preflight(project, observed_genomes, profile, check_inputs)
+    if bam_input:
+        from .alignment_inputs import validate_reused_alignments
+        try:
+            project["reused_alignments"] = validate_reused_alignments(project, samples, references, check_inputs)
+        except (ValueError, OSError) as exc:
+            raise ConfigError(str(exc)) from exc
     return RunPlan(project, samples, rows, contrasts, references[observed_genomes[0]], references)
 
 
@@ -845,6 +868,11 @@ def write_plan(plan: RunPlan, outdir: str | Path) -> None:
     _write_tsv(outdir / "resolved_config.tsv", resolved_rows)
     modules = plan.project.get("modules", {})
     enrichment_branches = int(bool(modules.get("dge_enrichment", False) and modules.get("gene_expression", True)))
+    if enrichment_branches and "extended_exons_v1" in expression_methods(plan.project):
+        settings = plan.project["gene_expression"]
+        enrichment_branches = int("legacy_c4" in expression_methods(plan.project))
+        enrichment_branches += int(plan.project.get("enrichment", {}).get("ora", True)) * (int(settings["stringent"])+int(settings["relaxed"]))
+        enrichment_branches += int(plan.project.get("enrichment", {}).get("gsea", True))
     enrichment_branches += int(bool(modules.get("apa_enrichment", False) and modules.get("apa_a", True)))
     enrichment_branches += int(bool(modules.get("apa_enrichment", False) and modules.get("apa_a2", True)))
     enrichment_branches += int(bool(
