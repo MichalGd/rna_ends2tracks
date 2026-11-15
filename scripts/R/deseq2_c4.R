@@ -8,6 +8,22 @@ get_arg <- function(name, default=NULL) {
 required <- c("--counts", "--samples", "--contrasts", "--design", "--outdir")
 for (item in required) if (is.null(get_arg(item))) stop(paste("Required argument:", item))
 suppressPackageStartupMessages({library(DESeq2); library(ggplot2)})
+sample_distance_plot <- function(distance_matrix) {
+  # Cluster the original VST distances, not distances between distance profiles.
+  tree <- hclust(as.dist(distance_matrix), method="complete")
+  sample_order <- rownames(distance_matrix)[tree$order]
+  long <- data.frame(
+    sample_x=factor(rep(colnames(distance_matrix), each=nrow(distance_matrix)), levels=sample_order),
+    sample_y=factor(rep(rownames(distance_matrix), times=ncol(distance_matrix)), levels=rev(sample_order)),
+    distance=as.vector(distance_matrix)
+  )
+  ggplot(long, aes(sample_x, sample_y, fill=distance)) + geom_tile() +
+    scale_fill_gradient(low="white", high="#2166AC") + coord_fixed() +
+    scale_x_discrete(expand=c(0,0)) + scale_y_discrete(expand=c(0,0)) + theme_bw() +
+    theme(axis.text.x=element_text(angle=60, hjust=1), panel.grid=element_blank()) +
+    labs(x=NULL, y=NULL, fill="VST distance", title="VST sample distances",
+         subtitle="Euclidean distance; complete-linkage hierarchical clustering")
+}
 
 raw <- read.delim(get_arg("--counts"), check.names=FALSE, stringsAsFactors=FALSE)
 samples_all <- read.delim(get_arg("--samples"), check.names=FALSE, stringsAsFactors=FALSE)
@@ -86,17 +102,10 @@ if (mode %in% c("all", "qc")) {
   ggsave(file.path(outdir, "C4_vst_pca.png"), plot, width=7, height=5, dpi=150)
   distance_matrix <- as.matrix(dist(t(assay(vsd))))
   write.table(distance_matrix, file.path(outdir, "C4_sample_distances.tsv"), sep="\t", quote=FALSE, col.names=NA)
-  distance_long <- data.frame(
-    sample_x=rep(colnames(distance_matrix), each=nrow(distance_matrix)),
-    sample_y=rep(rownames(distance_matrix), times=ncol(distance_matrix)),
-    distance=as.vector(distance_matrix), stringsAsFactors=FALSE
-  )
-  distance_plot <- ggplot(distance_long, aes(sample_x, sample_y, fill=distance)) +
-    geom_tile() + scale_fill_gradient(low="white", high="#2166AC") +
-    labs(x=NULL, y=NULL, fill="VST distance") + theme_bw() +
-    theme(axis.text.x=element_text(angle=60, hjust=1))
-  ggsave(file.path(outdir, "C4_sample_distances.pdf"), distance_plot, width=8, height=7)
-  ggsave(file.path(outdir, "C4_sample_distances.png"), distance_plot, width=8, height=7, dpi=150)
+  distance_plot <- sample_distance_plot(distance_matrix)
+  width <- max(8,3+0.28*ncol(distance_matrix)); height <- max(7,2+0.28*nrow(distance_matrix))
+  ggsave(file.path(outdir, "C4_sample_distances.pdf"), distance_plot, width=width, height=height)
+  ggsave(file.path(outdir, "C4_sample_distances.png"), distance_plot, width=width, height=height, dpi=150)
 }
 if (mode == "qc") quit(save="no", status=0)
 if (nzchar(contrast_id)) {

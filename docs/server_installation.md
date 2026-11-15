@@ -1,5 +1,7 @@
 # Shared server installation
 
+For the existing `biolserv` installation, [release 2.0](release_2_0.md) adds only a small application layer under `/opt/rna_ends2tracks/2.0.0`, reusing the compatible installed alpha12 dependency environment. The 2.0 promotion does not require another full environment. The generic installer below is an optional full installation for sites that need their own dependency stack; it also accepts stable tags such as `v2.0.0`.
+
 Install releases side-by-side into a writable shared environment parent. Do not modify an environment used by an active analysis.
 
 ```bash

@@ -10,13 +10,15 @@ from .execution import run_bounded
 from .external import event, progress_events, require_tools, run
 from .receipts import receipt_valid, write_receipt
 from .statistics import r_environment
+from .expression_methods import expression_rows, expression_methods, expression_index
 
 
 OUTPUT_NAMES = (
     "ora.tsv", "gsea.tsv", "mapping_audit.tsv", "enrichment.pdf", "enrichment.png",
-    "plot_index.tsv", "provenance.tsv",
+    "plot_index.tsv", "provenance.tsv", "mapping_genes.tsv",
 )
 INDEX_FIELDS = (
+    "expression_method", "analysis_mode", "numerator", "denominator", "hypothesis",
     "analysis_type", "genome", "contrast_id", "status", "prepared_gene_table",
     "background_genes", "foreground_genes", "ora_terms", "significant_ora_terms",
     "gsea_terms", "significant_gsea_terms", "ora_file", "gsea_file", "plot_pdf",
@@ -89,6 +91,22 @@ def _pcpa_by_gene(path: Path, contrast_id: str) -> dict[str, float]:
         if gene not in values or abs(delta) > abs(values[gene]):
             values[gene] = delta
     return values
+
+
+def _extended_gene_table(source: Path, target: Path, fdr: float, mode: str) -> tuple[int, int]:
+    rows = []
+    for row in _read(source):
+        if row.get("valid_test", "").lower() != "true":
+            continue
+        effect, stat, padj = (_number(row.get(key)) for key in ("log2FoldChange", "stat", "padj"))
+        if not row.get("gene_id") or effect is None or stat is None or padj is None:
+            continue
+        selected = mode != "shared_gsea" and padj <= fdr
+        direction = ("any_dge;upregulated" if effect > 0 else "any_dge;downregulated") if selected else ""
+        rows.append({"gene_id": row["gene_id"], "background": 1, "foreground": int(selected),
+                     "direction": direction, "rank_score": stat})
+    _write(target, rows, ["gene_id", "background", "foreground", "direction", "rank_score"])
+    return len(rows), sum(row["foreground"] for row in rows)
 
 
 def _apa_gene_table(
@@ -221,10 +239,21 @@ def enrichment(
     jobs: list[tuple[str, Any]] = []
     signature_inputs: list[Path] = []
 
-    def add_job(analysis_type: str, genome: str, species: str, contrast_id: str, source: Path, pcpa: Path | None) -> None:
+    def add_job(analysis_type: str, genome: str, species: str, contrast_id: str, source: Path, pcpa: Path | None,
+                expression: dict | None = None) -> None:
+        expression = expression or {}
+        method = expression.get("expression_method", "legacy_c4" if analysis_type == "dge" else "")
+        mode = expression.get("analysis_mode", "legacy_c4" if analysis_type == "dge" else "")
+        extended = method == "extended_exons_v1"
+        ora = bool(settings["ora"] and (not extended or mode != "shared_gsea"))
+        gsea = bool(settings["gsea"] and (not extended or mode == "shared_gsea"))
+        if not (ora or gsea):
+            return
         if not source.is_file():
             raise RuntimeError(f"Missing {analysis_type} enrichment source: {source}")
-        if analysis_type == "dge":
+        if extended:
+            job_dir = results / "05_gene_expression" / genome / method / "contrasts" / contrast_id / mode / "enrichment"
+        elif analysis_type == "dge":
             job_dir = results / "05_gene_expression" / genome / "enrichment" / contrast_id
         elif analysis_type == "apa_a":
             job_dir = results / "06_apa_a_mcell2019" / genome / "enrichment" / contrast_id
@@ -233,11 +262,12 @@ def enrichment(
         else:
             job_dir = results / "07_apa_b" / genome / "enrichment" / contrast_id
         gene_table = job_dir / "prepared_gene_table.tsv"
-        inputs = [source] + ([pcpa] if pcpa is not None and pcpa.is_file() else [])
+        inputs = [source, script_root / "R" / "gene_set_enrichment.R"] + ([pcpa] if pcpa is not None and pcpa.is_file() else [])
         signature_inputs.extend(inputs)
         job_signature = signature_for(inputs, {
             "module": "enrichment", "analysis_type": analysis_type, "genome": genome,
             "contrast_id": contrast_id, "settings": settings, "fdr": fdr,
+            "expression": expression, "ora": ora, "gsea": gsea,
         })
 
         def worker() -> dict[str, Any]:
@@ -246,7 +276,9 @@ def enrichment(
                 if rows:
                     return rows[0]
             job_dir.mkdir(parents=True, exist_ok=True)
-            if analysis_type == "dge":
+            if extended:
+                background, foreground = _extended_gene_table(source, gene_table, fdr, mode)
+            elif analysis_type == "dge":
                 background, foreground = _dge_gene_table(
                     source, gene_table, fdr, float(settings["dge_min_abs_lfc"]),
                 )
@@ -260,7 +292,10 @@ def enrichment(
                 "--input", str(gene_table), "--outdir", str(job_dir),
                 "--analysis-type", analysis_type, "--species", species,
                 "--genome", genome, "--contrast-id", contrast_id,
-                "--ora", str(settings["ora"]).lower(), "--gsea", str(settings["gsea"]).lower(),
+                "--ora", str(ora).lower(), "--gsea", str(gsea).lower(),
+                "--expression-method", method, "--analysis-mode", mode,
+                "--numerator", expression.get("numerator", ""), "--denominator", expression.get("denominator", ""),
+                "--hypothesis", expression.get("hypothesis", ""),
                 "--go", str(settings["go"]).lower(), "--reactome", str(settings["reactome"]).lower(),
                 "--hallmarks", str(settings["hallmarks"]).lower(),
                 "--kegg", str(settings["kegg"]).lower(),
@@ -269,13 +304,18 @@ def enrichment(
                 "--network-max-genes", str(settings["network_max_genes"]),
                 "--padj", str(enrichment_padj), "--min-size", str(settings["min_geneset_size"]),
                 "--max-size", str(settings["max_geneset_size"]),
+                "--threads", str(plan.project["resources"]["enrichment"]["threads"]),
             ]
             resource = plan.project["resources"]["enrichment"]
-            run(command, log_dir / "enrichment" / genome / contrast_id / f"{analysis_type}.log",
-                env=r_environment(resource["threads"], resource["memory_gb"]))
+            temporary = Path(plan.project.get("tmp_dir") or job_dir / ".tmp") / "enrichment" / genome / contrast_id / (mode or analysis_type)
+            temporary.mkdir(parents=True, exist_ok=True)
+            run(command, log_dir / "enrichment" / genome / contrast_id / f"{analysis_type}_{mode or 'default'}.log",
+                env={**r_environment(resource["threads"], resource["memory_gb"]), "TMPDIR": str(temporary), "TMP": str(temporary), "TEMP": str(temporary)})
             row = _index_row(
                 analysis_type, genome, contrast_id, job_dir, gene_table, background, foreground, enrichment_padj,
             )
+            row.update(expression_method=method, analysis_mode=mode, numerator=expression.get("numerator", ""),
+                       denominator=expression.get("denominator", ""), hypothesis=expression.get("hypothesis", ""))
             job_index = job_dir / "job_index.tsv"
             _write(job_index, [row], INDEX_FIELDS)
             rich_outputs: list[Path] = []
@@ -290,13 +330,21 @@ def enrichment(
                           ["rna-ends2tracks", "enrichment", analysis_type, contrast_id])
             return row
 
-        jobs.append((f"{analysis_type}:{genome}:{contrast_id}", worker))
+        jobs.append((f"{analysis_type}__{genome}__{contrast_id}__{mode}", worker))
 
     for genome, reference in plan.references.items():
         species = str(reference["species"])
         if dge_enabled:
-            for row in _read(results / "05_gene_expression" / genome / "C4_primary_deseq2" / "result_index.tsv"):
-                add_job("dge", genome, species, row["contrast_id"], Path(row["result_file"]), None)
+            if any(row.get("genome",genome) == genome for row in plan.contrasts):
+                for method in expression_methods(plan.project):
+                    index = expression_index(results,genome,method)
+                    if not index.is_file():
+                        raise RuntimeError(f"Missing enabled expression index: {index}; run gene_expression first")
+            for row in expression_rows(plan.project, results, genome):
+                contrast = next((con for con in plan.contrasts if con["contrast_id"] == row["contrast_id"] and con.get("genome",genome) == genome),{})
+                for key in ("numerator","denominator"):
+                    row.setdefault(key,contrast.get(key,""))
+                add_job("dge", genome, species, row["contrast_id"], Path(row["result_file"]), None, row)
         if apa_enabled:
             pcpa = results / "06_apa_a_mcell2019" / genome / "candidate_pcpa.tsv"
             for row in _read(results / "06_apa_a_mcell2019" / genome / "dexseq" / "result_index.tsv"):
@@ -310,7 +358,11 @@ def enrichment(
             for row in _read(results / "07_apa_b" / genome / "drimseq" / "result_index.tsv"):
                 add_job("apa_b", genome, species, row["contrast_id"], Path(row["gene_summary_file"]), pcpa)
     if not jobs:
-        raise RuntimeError("Enrichment is enabled, but no upstream contrast outputs were found")
+        index = outroot / "enrichment_index.tsv"
+        _write(index, [], INDEX_FIELDS)
+        event(log_dir, "enrichment", "completed", "No enabled enrichment jobs for the selected expression modes/contrasts")
+        write_receipt("enrichment", outroot, signature_for([], {"settings": settings}), [index], ["rna-ends2tracks", "enrichment"])
+        return
     resource = plan.project["resources"]["enrichment"]
     rows = run_bounded(
         "enrichment", jobs, resource["parallel_jobs"], results / ".checkpoints" / "timings" / "enrichment",

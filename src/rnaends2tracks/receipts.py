@@ -14,6 +14,9 @@ from . import __version__
 
 HASH_LIMIT_BYTES = 64 * 1024 * 1024
 COMPATIBLE_WORKFLOW_VERSIONS = {
+    # 2.0.0 names the validated alpha13.post1 algorithms; signatures and output
+    # integrity must still match. Earlier alpha algorithms are not equivalent.
+    "2.0.0": frozenset({"0.1.0a13.post1"}),
     "0.1.0a9.post1": frozenset({"0.1.0a9"}),
     "0.1.0a9.post2": frozenset({"0.1.0a9", "0.1.0a9.post1"}),
     "0.1.0a11.post1": frozenset({"0.1.0a11"}),

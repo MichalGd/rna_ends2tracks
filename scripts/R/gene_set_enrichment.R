@@ -46,6 +46,15 @@ species <- get_arg("--species")
 target_species <- if (tolower(species) == "mouse") "Mus musculus" else "Homo sapiens"
 genome <- get_arg("--genome")
 contrast_id <- get_arg("--contrast-id")
+numerator <- get_arg("--numerator", "numerator")
+denominator <- get_arg("--denominator", "denominator")
+if (!nzchar(numerator)) numerator <- "numerator"
+if (!nzchar(denominator)) denominator <- "denominator"
+query_label <- function(query) {
+  if (query == "upregulated") paste("Higher in",numerator) else
+  if (query == "downregulated") paste("Higher in",denominator) else
+  if (query == "any_dge") "Any DE (nondirectional)" else query
+}
 run_ora <- as_flag(get_arg("--ora", "true"))
 run_gsea <- as_flag(get_arg("--gsea", "true"))
 use_go <- as_flag(get_arg("--go", "true"))
@@ -112,6 +121,9 @@ term2gene <- if (length(sets)) unique(do.call(rbind, sets)) else data.frame(
   database=character(), term_id=character(), term_name=character(), gene_id=character(), db_version=character()
 )
 term2gene <- term2gene[!is.na(term2gene$gene_id) & nzchar(term2gene$gene_id), , drop=FALSE]
+requested <- c(if(use_go) c("GO_BP","GO_MF","GO_CC"),if(use_reactome) "REACTOME",if(use_hallmarks) "HALLMARK")
+missing_databases <- setdiff(requested,unique(term2gene$database))
+if(length(missing_databases)) stop(paste("Requested gene-set databases unavailable; check msigdbr/network:",paste(missing_databases,collapse=", ")))
 
 ora_columns <- c("analysis_type", "contrast_id", "genome", "query", "database", "term_id", "term_name",
                  "set_size", "background_size", "foreground_size", "overlap_count", "pvalue", "padj", "genes")
@@ -161,7 +173,8 @@ if (run_gsea && length(stats) >= min_size && length(unique(stats)) > 1 && nrow(t
     pathways <- split(db$gene_id, db$term_id)
     pathways <- lapply(pathways, unique)
     fg <- suppressWarnings(fgsea::fgseaMultilevel(
-      pathways=pathways, stats=stats, minSize=min_size, maxSize=max_size, eps=0
+      pathways=pathways, stats=stats, minSize=min_size, maxSize=max_size, eps=0,
+      nproc=as.integer(get_arg("--threads", "1"))
     ))
     if (!nrow(fg)) next
     names_by_id <- setNames(db$term_name, db$term_id)
@@ -188,34 +201,18 @@ mapping <- data.frame(
           sum(as.logical(genes$foreground))), stringsAsFactors=FALSE
 )
 write.table(mapping, file.path(outdir, "mapping_audit.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+mapping_genes <- data.frame(gene_id=genes$gene_id,background=genes$background,foreground=genes$foreground,
+                           represented_in_gene_sets=genes$gene_id %in% term2gene$gene_id)
+write.table(mapping_genes,file.path(outdir,"mapping_genes.tsv"),sep="\t",quote=FALSE,row.names=FALSE)
 
-plot_rows <- data.frame()
-if (nrow(ora)) {
-  selected <- ora[!is.na(ora$padj) & ora$padj <= padj_threshold, , drop=FALSE]
-  if (nrow(selected)) {
-    selected$score <- -log10(pmax(selected$padj, .Machine$double.xmin))
-    selected$source <- paste("ORA", selected$query, selected$database, sep=":")
-    plot_rows <- rbind(plot_rows, selected[, c("term_name", "score", "source")])
-  }
-}
-if (nrow(gsea)) {
-  selected <- gsea[!is.na(gsea$padj) & gsea$padj <= padj_threshold, , drop=FALSE]
-  if (nrow(selected)) {
-    selected$score <- abs(selected$NES)
-    selected$source <- paste("GSEA", selected$database, sep=":")
-    plot_rows <- rbind(plot_rows, selected[, c("term_name", "score", "source")])
-  }
-}
-if (nrow(plot_rows)) {
-  plot_rows <- plot_rows[order(-plot_rows$score), , drop=FALSE]
-  plot_rows <- head(plot_rows, 25)
-  plot_rows$term_name <- factor(plot_rows$term_name, levels=rev(unique(plot_rows$term_name)))
-  enrichment_plot <- ggplot(plot_rows, aes(score, term_name, color=source)) + geom_point(size=2.5) +
-    labs(x="Enrichment score", y=NULL, title=paste(analysis_type, contrast_id)) + theme_bw()
-} else {
-  enrichment_plot <- ggplot() + annotate("text", x=0, y=0, label="No enriched term passed the configured threshold") +
-    xlim(-1, 1) + ylim(-1, 1) + theme_void() + labs(title=paste(analysis_type, contrast_id))
-}
+# Keep the compatibility overview informational. ORA significance and signed
+# GSEA NES have different meanings and must never share a ranked score axis.
+enrichment_plot <- ggplot() + annotate("text",x=0,y=0,label=paste(
+  "ORA and GSEA are presented separately.",
+  paste("ORA significant terms:",sum(!is.na(ora$padj) & ora$padj <= padj_threshold)),
+  paste("GSEA significant terms:",sum(!is.na(gsea$padj) & gsea$padj <= padj_threshold)),
+  "See the method-specific plots and complete tables.",sep="\n")) +
+  xlim(-1,1)+ylim(-1,1)+theme_void()+labs(title=paste(analysis_type,contrast_id,get_arg("--analysis-mode","")))
 ggsave(file.path(outdir, "enrichment.pdf"), enrichment_plot, width=9, height=7)
 ggsave(file.path(outdir, "enrichment.png"), enrichment_plot, width=9, height=7, dpi=150)
 
@@ -270,7 +267,7 @@ concept_plot <- function(frame, genes_column, title) {
     theme_void() + theme(legend.position="bottom", plot.title=element_text(hjust=0.5))
 }
 
-if (rich_plots && nrow(ora)) {
+if (nrow(ora)) {
   significant <- ora[!is.na(ora$padj) & ora$padj <= padj_threshold & ora$overlap_count > 0, , drop=FALSE]
   groups <- split(significant, interaction(significant$query, significant$database, drop=TRUE))
   for (frame in groups) {
@@ -279,7 +276,7 @@ if (rich_plots && nrow(ora)) {
     if (!nrow(frame)) next
     frame$term_plot <- term_factor(frame)
     frame$gene_ratio <- frame$overlap_count / pmax(frame$foreground_size, 1)
-    title <- paste("ORA", frame$query[1], frame$database[1], contrast_id, sep=" | ")
+    title <- paste("ORA", query_label(frame$query[1]), frame$database[1], contrast_id, get_arg("--analysis-mode",""), sep=" | ")
     dot <- ggplot(frame, aes(gene_ratio, term_plot, size=overlap_count, color=-log10(pmax(padj, .Machine$double.xmin)))) +
       geom_point() + scale_color_viridis_c() + theme_bw() +
       labs(title=title, x="Gene ratio", y=NULL, color="-log10(FDR)", size="Overlap")
@@ -287,31 +284,34 @@ if (rich_plots && nrow(ora)) {
       geom_col() + scale_fill_viridis_c() + theme_bw() +
       labs(title=title, x="-log10(FDR)", y=NULL, fill="Gene ratio")
     save_rich_plot(dot, "ORA", frame$query[1], frame$database[1], "dotplot", nrow(frame))
-    save_rich_plot(bar, "ORA", frame$query[1], frame$database[1], "barplot", nrow(frame))
-    network <- concept_plot(frame, "genes", paste(title, "concept network"))
+    if (rich_plots) save_rich_plot(bar, "ORA", frame$query[1], frame$database[1], "barplot", nrow(frame))
+    network <- if (rich_plots) concept_plot(frame, "genes", paste(title, "concept network")) else NULL
     if (!is.null(network)) save_rich_plot(network, "ORA", frame$query[1], frame$database[1],
                                           "concept_network", min(nrow(frame), network_max_terms), 12, 8)
   }
 }
-if (rich_plots && nrow(gsea)) {
+if (nrow(gsea)) {
   significant <- gsea[!is.na(gsea$padj) & gsea$padj <= padj_threshold, , drop=FALSE]
-  groups <- split(significant, significant$database, drop=TRUE)
+  significant$nes_direction <- ifelse(significant$NES > 0,"positive","negative")
+  groups <- split(significant, interaction(significant$database,significant$nes_direction,drop=TRUE))
   for (frame in groups) {
     frame <- frame[order(frame$padj, -abs(frame$NES)), , drop=FALSE]
     frame <- head(frame, 20)
     if (!nrow(frame)) next
     frame$term_plot <- term_factor(frame)
-    title <- paste("GSEA", frame$database[1], contrast_id, sep=" | ")
+    direction <- frame$nes_direction[1]
+    favored <- if (analysis_type == "dge") paste("Favored:",if(direction == "positive") numerator else denominator) else paste("NES",direction)
+    title <- paste("GSEA", favored, frame$database[1], contrast_id, sep=" | ")
     dot <- ggplot(frame, aes(NES, term_plot, size=set_size, color=-log10(pmax(padj, .Machine$double.xmin)))) +
       geom_point() + scale_color_viridis_c() + theme_bw() +
       labs(title=title, x="Normalized enrichment score", y=NULL, color="-log10(FDR)", size="Set size")
     bar <- ggplot(frame, aes(NES, term_plot, fill=NES > 0)) + geom_col() + theme_bw() +
       scale_fill_manual(values=c("TRUE"="#B2182B", "FALSE"="#2166AC")) +
       labs(title=title, x="Normalized enrichment score", y=NULL, fill="Positive NES")
-    save_rich_plot(dot, "GSEA", "ranked", frame$database[1], "dotplot", nrow(frame))
-    save_rich_plot(bar, "GSEA", "ranked", frame$database[1], "barplot", nrow(frame))
-    network <- concept_plot(frame, "leading_edge", paste(title, "concept network"))
-    if (!is.null(network)) save_rich_plot(network, "GSEA", "ranked", frame$database[1],
+    save_rich_plot(dot, "GSEA", direction, frame$database[1], "dotplot", nrow(frame))
+    if (rich_plots) save_rich_plot(bar, "GSEA", direction, frame$database[1], "barplot", nrow(frame))
+    network <- if (rich_plots) concept_plot(frame, "leading_edge", paste(title, "concept network")) else NULL
+    if (!is.null(network)) save_rich_plot(network, "GSEA", direction, frame$database[1],
                                           "concept_network", min(nrow(frame), network_max_terms), 12, 8)
   }
 }
@@ -331,3 +331,10 @@ provenance <- data.frame(
           nrow(plot_index), padj_threshold, min_size, max_size), stringsAsFactors=FALSE
 )
 write.table(provenance, file.path(outdir, "provenance.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+extra <- data.frame(key=c("expression_method","analysis_mode","numerator","denominator","DE_hypothesis",
+                          "ORA_BH_scope","GSEA_BH_scope","ORA_background","GSEA_rank_definition"),
+  value=c(get_arg("--expression-method",""),get_arg("--analysis-mode",""),numerator,denominator,get_arg("--hypothesis",""),
+          "per query and database within contrast/mode", "per database within contrast",
+          "eligible valid tested genes; unmapped genes retained in denominator",
+          if(get_arg("--analysis-mode","") == "shared_gsea") "ordinary Wald statistic, all common valid tested genes" else "prepared input rank_score"))
+write.table(rbind(provenance,extra),file.path(outdir,"provenance.tsv"),sep="\t",quote=FALSE,row.names=FALSE)

@@ -8,6 +8,7 @@ from .config import RunPlan, signature_for
 from .external import event, require_tools, run
 from .receipts import receipt_valid, write_receipt
 from .statistics import r_environment, run_r_contrasts
+from .expression_methods import expression_methods
 
 
 def _read_matrix(path: Path, id_column: str) -> tuple[list[str], dict[str, list[int]]]:
@@ -64,13 +65,13 @@ def _write_c4_c5_diagnostic(
                     writer.writerow([sample_id, gene, left, right, left_cpm, right_cpm, ratio])
 
 
-def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False, force: bool = False) -> None:
+def _legacy_gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False, force: bool = False) -> list[Path]:
     module_dir = results / "05_gene_expression"
     log_dir = results / "logs"
     module_dir.mkdir(parents=True, exist_ok=True)
     if not plan.project.get("modules", {}).get("gene_expression", True):
         event(log_dir, "gene_expression", "disabled", "RUN_GENE_EXPRESSION=false")
-        return
+        return []
     signature_inputs = [
         results / "02_alignment" / sample["sample_id"] / f"{sample['sample_id']}.bam" for sample in plan.samples
     ] + [
@@ -87,9 +88,11 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
         "design": plan.project["design"], "reporting": plan.project["reporting"],
         "plot_lfc": plan.project.get("enrichment", {}).get("dge_min_abs_lfc", 1.0),
     }) if not dry_run else "dry-run"
-    if not force and not dry_run and receipt_valid(module_dir, signature):
+    receipt_dir = module_dir / ".legacy_c4_receipt"
+    if not force and not dry_run and receipt_valid(receipt_dir, signature):
         event(log_dir, "gene_expression", "skipped", "Valid C4/C5 gene-expression receipt")
-        return
+        import json
+        return [Path(row["path"]) for row in json.loads((receipt_dir / "run_receipt.json").read_text(encoding="utf-8"))["outputs"]]
     if not dry_run:
         require_tools(["featureCounts", "Rscript"])
     expected: list[Path] = []
@@ -179,5 +182,22 @@ def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bo
                                          primary / f"{contrast_id}.volcano.pdf",
                                          primary / f"{contrast_id}.volcano.png"])
     if not dry_run:
-        write_receipt("gene_expression", module_dir, signature, expected, ["rna-ends2tracks", "gene_expression"])
+        write_receipt("gene_expression", receipt_dir, signature, expected, ["rna-ends2tracks", "gene_expression"])
     event(log_dir, "gene_expression", "dry_run" if dry_run else "completed", "C4 primary DGE; C5 diagnostic only")
+    return expected
+
+
+def gene_expression(plan: RunPlan, results: Path, script_root: Path, dry_run: bool = False, force: bool = False) -> None:
+    if not plan.project.get("modules", {}).get("gene_expression", True):
+        event(results / "logs", "gene_expression", "disabled", "RUN_GENE_EXPRESSION=false")
+        return
+    methods = expression_methods(plan.project)
+    outputs = []
+    if "legacy_c4" in methods:
+        outputs.extend(_legacy_gene_expression(plan, results, script_root, dry_run, force))
+    if "extended_exons_v1" in methods:
+        from .gex import extended_gene_expression
+        outputs.extend(extended_gene_expression(plan, results, script_root, dry_run, force))
+    if not dry_run:
+        write_receipt("gene_expression", results / "05_gene_expression", signature_for(outputs, {"methods": methods}),
+                      list(dict.fromkeys(outputs)), ["rna-ends2tracks", "gene_expression"])

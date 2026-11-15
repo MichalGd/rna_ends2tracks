@@ -40,6 +40,7 @@ def run_r_contrasts(
     signature_parameters: dict[str, Any],
     dry_run: bool,
     force: bool,
+    environment: dict[str, str] | None = None,
 ) -> None:
     fragments = outdir / ".index_fragments"
     fragments.mkdir(parents=True, exist_ok=True)
@@ -67,7 +68,7 @@ def run_r_contrasts(
             ]
             run(
                 command, log_dir / f"{contrast_id}.log", dry_run,
-                env=r_environment(threads, memory_gb),
+                env={**r_environment(threads, memory_gb), **(environment or {})},
             )
             if not dry_run:
                 write_receipt(

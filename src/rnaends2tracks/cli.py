@@ -131,6 +131,25 @@ def _process_state(pid: object, workflow_status: object) -> str:
         return "not running"
     try:
         numeric_pid = int(pid)
+        if os.name == "nt":
+            # os.kill(pid, 0) terminates the target on Windows. Query it instead.
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x1000, False, numeric_pid)
+            if not handle:
+                return "unknown" if ctypes.get_last_error() == 5 else "not running"
+            try:
+                code = wintypes.DWORD()
+                if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return "unknown"
+                return "running" if code.value == 259 else "not running"
+            finally:
+                kernel.CloseHandle(handle)
         os.kill(numeric_pid, 0)
     except (TypeError, ValueError, ProcessLookupError):
         return "not running"
@@ -201,7 +220,7 @@ def _status_observations(results: Path, payload: dict[str, object]) -> dict[str,
         "BAMs": final_bams,
         "RSeQC": _table_rows(results / "01_qc" / "rseqc" / "rseqc_summary.tsv"),
         "BigWigs": len(list((results / "09_tracks").rglob("*.bw"))),
-        "DGE": len(list((results / "05_gene_expression").rglob("*.deseq2.tsv"))),
+        "DGE": len(list((results / "05_gene_expression").rglob("*.deseq2.tsv"))) + len(list((results / "05_gene_expression").rglob("deseq2.tsv"))),
         "APA-A": len(list((results / "06_apa_a_mcell2019").rglob("*.dexseq.tsv"))),
         "APA-A2": len(list((results / "06b_apa_a2_corrected").rglob("*.apa_a2_sites.tsv"))),
         "APA-B": len(list((results / "07_apa_b").rglob("*.drimseq_stager.tsv"))),
@@ -265,7 +284,7 @@ def execute(args: argparse.Namespace) -> int:
     results.mkdir(parents=True, exist_ok=True)
     universe_path = results / "04_active_pas" / "sample_set.json"
     current_universe = sample_universe(plan)
-    if universe_path.is_file():
+    if universe_path.is_file() and plan.project.get("input_mode") != "bam":
         try:
             prior_universe = json.loads(universe_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
@@ -275,12 +294,21 @@ def execute(args: argparse.Namespace) -> int:
                 "OUTPUT_DIR already contains a different active-PAS sample universe; use a new OUTPUT_DIR"
             )
     steps = _selected_steps(args)
+    if plan.project.get("input_mode") == "bam":
+        if args.from_step and _normal_step(args.from_step, "") not in {"validate", "gene_expression", "enrichment", "report"}:
+            raise ConfigError("BAM-input mode starts at gene_expression, enrichment or report")
+        steps = [step for step in steps if step in {"validate", "gene_expression", "enrichment", "report"}]
+        if not steps:
+            raise ConfigError("No runnable BAM-input stages selected")
     forced = {_normal_step(value, value) for value in args.force_step}
     script_root = workflow_asset("scripts")
 
     with run_lock(results):
         metadata = results / "00_metadata"
         write_plan(plan, metadata)
+        if plan.project.get("input_mode") == "bam" and not args.dry_run and not args.skip_input_checks:
+            from .alignment_inputs import write_reuse_manifest
+            write_reuse_manifest(plan, results)
         event(results / "logs", "workflow", "started", f"Selected stages: {','.join(steps)}")
         event(results / "logs", "validate", "completed",
               f"{len(plan.samples)} samples; {len(plan.contrasts)} within-genome contrasts")

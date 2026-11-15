@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$TAG" ]] || { echo "--tag is required" >&2; exit 2; }
-[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+([.]post[0-9]+)?$ ]] || { echo "Unexpected release tag: $TAG" >&2; exit 2; }
+[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+([.]post[0-9]+)?)?$ ]] || { echo "Unexpected release tag: $TAG" >&2; exit 2; }
 [[ -x "$MAMBA" ]] || { echo "Mamba is not executable: $MAMBA" >&2; exit 2; }
 [[ -d "$ENV_PARENT" && -w "$ENV_PARENT" ]] || { echo "Environment parent is not writable: $ENV_PARENT" >&2; exit 2; }
 mkdir -p "$BIN_DIR"
@@ -59,8 +59,10 @@ nice -n 10 "$MAMBA" --no-rc env create --prefix "$ENV_PREFIX" --file environment
   2>&1 | tee "$INSTALL_AUDIT/pip-install.log"
 "$MAMBA" run -p "$ENV_PREFIX" python -m unittest discover -s tests -v \
   2>&1 | tee "$INSTALL_AUDIT/python-tests.log"
+"$MAMBA" run -p "$ENV_PREFIX" python tests/bam_expression_smoke.py "$STAGING/bam-expression-fixture" \
+  2>&1 | tee "$INSTALL_AUDIT/bam-expression-smoke.log"
 "$MAMBA" run -p "$ENV_PREFIX" Rscript -e \
-  'stopifnot(requireNamespace("DESeq2"),requireNamespace("DEXSeq"),requireNamespace("DRIMSeq"),requireNamespace("stageR"))'
+  'stopifnot(requireNamespace("DESeq2"),requireNamespace("edgeR"),requireNamespace("DEXSeq"),requireNamespace("DRIMSeq"),requireNamespace("stageR"))'
 "$MAMBA" run -p "$ENV_PREFIX" Rscript -e \
   'files <- list.files("scripts/R", pattern="[.]R$", full.names=TRUE); stopifnot(length(files) >= 6L); invisible(lapply(files, parse))'
 "$MAMBA" run -p "$ENV_PREFIX" Rscript scripts/R/dexseq_all_pairs.R --self-test \
@@ -71,6 +73,10 @@ nice -n 10 "$MAMBA" --no-rc env create --prefix "$ENV_PREFIX" --file environment
   2>&1 | tee "$INSTALL_AUDIT/r-drimseq-stager-na-smoke.log"
 "$MAMBA" run -p "$ENV_PREFIX" Rscript tests/R/deseq2_pairing_smoke.R \
   2>&1 | tee "$INSTALL_AUDIT/r-deseq2-smoke.log"
+"$MAMBA" run -p "$ENV_PREFIX" Rscript tests/extended_expression_smoke.R "$STAGING/expression-fixture" scripts/R/deseq2_gex.R \
+  2>&1 | tee "$INSTALL_AUDIT/r-extended-expression-smoke.log"
+"$MAMBA" run -p "$ENV_PREFIX" Rscript tests/enrichment_reporting_smoke.R "$STAGING/enrichment-fixture" scripts/R/gene_set_enrichment.R \
+  2>&1 | tee "$INSTALL_AUDIT/r-enrichment-reporting-smoke.log"
 "$ENV_PREFIX/bin/rna-ends2tracks" --version
 "$MAMBA" list -p "$ENV_PREFIX" --explicit > "$INSTALL_AUDIT/environment-linux-64.explicit.txt"
 "$MAMBA" run -p "$ENV_PREFIX" python -m pip freeze > "$INSTALL_AUDIT/pip-freeze.txt"

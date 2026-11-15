@@ -9,10 +9,10 @@ rna-ends2tracks --version
 rna-ends2tracks --help | head -n 25
 ```
 
-The release documented here is:
+The 2.0 release identifies itself as:
 
 ```text
-0.1.0a12.post1
+2.0.0
 ```
 
 Use the configuration template belonging to the installed release; do not combine a newer executable with an older unreviewed template.
@@ -22,7 +22,7 @@ Use the configuration template belonging to the installed release; do not combin
 ```bash
 PROJECT="$HOME/Analysis/my_quantseq_project"
 CONFIG_DIR="$PROJECT/config"
-RELEASE_ENV="/opt/conda_envs/rna_ends2tracks-0.1.0a12.post1"
+RELEASE_ENV="/opt/rna_ends2tracks/2.0.0"
 
 mkdir -p "$CONFIG_DIR"
 cp "$RELEASE_ENV/share/rna_ends2tracks/config/config.conf" \

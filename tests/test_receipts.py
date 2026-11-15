@@ -9,6 +9,25 @@ from rnaends2tracks.receipts import receipt_valid, write_receipt
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_2_0_accepts_only_identical_alpha13_post1_with_valid_signature_and_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); output = root / "result.tsv"; output.write_bytes(b"abc")
+            directory = root / "receipt"
+            receipt = write_receipt("test", directory, "sig", [output], ["test"])
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            with patch("rnaends2tracks.receipts.__version__", "2.0.0"):
+                payload["workflow_version"] = "0.1.0a13.post1"
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertTrue(receipt_valid(directory, "sig"))
+                self.assertFalse(receipt_valid(directory, "different-signature"))
+                output.write_bytes(b"abd")
+                self.assertFalse(receipt_valid(directory, "sig"))
+                output.write_bytes(b"abc")
+                for version in ("0.1.0a13", "0.1.0a12.post1", "2.0.1", "9.9.9"):
+                    payload["workflow_version"] = version
+                    receipt.write_text(json.dumps(payload), encoding="utf-8")
+                    self.assertFalse(receipt_valid(directory, "sig"), version)
+
     def test_small_outputs_use_sha256_and_detect_same_size_changes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); output = root / "small.tsv"; output.write_bytes(b"abc")

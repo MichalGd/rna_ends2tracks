@@ -13,11 +13,15 @@ from .config import RunPlan, signature_for, workflow_requirements
 from .external import event
 from .provenance import generate_provenance_dashboard
 from .receipts import receipt_valid, write_receipt
+from .report_assets import FIGURE_ASSET_LAYOUT, copy_report_image, write_image_manifest
+from .expression_methods import expression_methods, expression_rows
+from .gex_report import render_expression_report
 
 
 CONTRAST_SUMMARY_FIELDS = [
     "genome", "contrast_id", "numerator", "denominator", "design_mode",
     "paired", "n_pairs", "resolved_design",
+    "expression_method", "analysis_mode",
     "dge_tested_genes", "dge_significant", "dge_up", "dge_down",
     "apa_a_tested_genes", "apa_a_significant_genes", "apa_a_tested_sites",
     "apa_a_significant_sites", "apa_a_distal_genes",
@@ -42,7 +46,7 @@ APA_EVENT_FIELDS = [
 ]
 ENRICHMENT_TERM_FIELDS = [
     "analysis_type", "genome", "contrast_id", "method", "query", "database",
-    "term_id", "term_name", "effect", "padj",
+    "term_id", "term_name", "direction", "NES", "overlap_count", "padj",
 ]
 
 TRACK_COLLECTION_ORDER = [
@@ -123,7 +127,7 @@ def _dge_counts(path: Path, fdr: float) -> dict[str, int]:
         if (_number(row.get("padj")) is not None and _number(row.get("padj")) <= fdr)
     ]
     return {
-        "dge_tested_genes": len(rows),
+        "dge_tested_genes": sum(row.get("valid_test", "true").lower() == "true" for row in rows),
         "dge_significant": len(significant),
         "dge_up": sum((_number(row.get("log2FoldChange")) or 0) > 0 for row in significant),
         "dge_down": sum((_number(row.get("log2FoldChange")) or 0) < 0 for row in significant),
@@ -179,6 +183,12 @@ def _contrast_summary(
         dge_index = _index_by_contrast(
             results / "05_gene_expression" / genome / "C4_primary_deseq2" / "result_index.tsv"
         )
+        primary = plan.project.get("gene_expression", {}).get("primary_method", "legacy_c4")
+        if primary != "legacy_c4":
+            dge_index = {}
+            for candidate in expression_rows(plan.project, results, genome):
+                if candidate["expression_method"] == primary and candidate["analysis_mode"] != "shared_gsea":
+                    dge_index.setdefault(candidate["contrast_id"], candidate)
         apa_a_index = _index_by_contrast(
             results / "06_apa_a_mcell2019" / genome / "dexseq" / "result_index.tsv"
         )
@@ -238,6 +248,8 @@ def _contrast_summary(
             }
             if contrast_id in dge_index:
                 index = dge_index[contrast_id]
+                row["expression_method"] = index.get("expression_method", "legacy_c4")
+                row["analysis_mode"] = index.get("analysis_mode", "legacy_c4")
                 counts = _dge_counts(Path(index["result_file"]), fdr)
                 _require_index_count(
                     "DGE", contrast_id, index, "significant", counts["dge_significant"],
@@ -365,12 +377,18 @@ def _html_table(
     return f"<div class='table-wrap'><table{identifier}><thead><tr>{headings}</tr></thead><tbody>{body}</tbody></table></div>"
 
 
-def _image_gallery(outdir: Path, images: list[tuple[str, Path]]) -> str:
+def _image_gallery(
+    outdir: Path, images: list[tuple[str, Path]], assets: list[dict[str, object]] | None = None,
+) -> str:
     cards: list[str] = []
     for label, path in images:
         if not path.is_file():
             continue
-        href = path.relative_to(outdir).as_posix() if path.is_relative_to(outdir) else "../" + path.relative_to(outdir.parent).as_posix()
+        record = copy_report_image(outdir, path)
+        record["label"] = label
+        if assets is not None:
+            assets.append(record)
+        href = str(record["asset"])
         cards.append(
             "<figure><a href='" + html.escape(href) + "'><img loading='lazy' src='" + html.escape(href) +
             "' alt='" + html.escape(label) + "'></a><figcaption>" + html.escape(label) + "</figcaption></figure>"
@@ -521,20 +539,31 @@ def _top_enrichment_terms(
                 padj = _number(row.get("padj"))
                 if padj is None or padj > fdr:
                     continue
-                effect = row.get("NES", "") if method == "GSEA" else row.get("overlap_count", "")
+                if method == "GSEA":
+                    nes = _number(row.get("NES"))
+                    sign = "positive" if nes is not None and nes > 0 else "negative"
+                    direction = f"{sign} NES"
+                    if index.get("analysis_type") == "dge":
+                        direction += "; favored: " + index.get("numerator" if sign == "positive" else "denominator", sign)
+                else:
+                    direction = {"any_dge": "nondirectional", "upregulated": "higher in " + index.get("numerator", "numerator"),
+                                 "downregulated": "higher in " + index.get("denominator", "denominator")}.get(row.get("query"), row.get("query", ""))
                 selected.append((padj, {
                     "analysis_type": index.get("analysis_type", ""),
                     "genome": index.get("genome", ""),
                     "contrast_id": index.get("contrast_id", ""), "method": method,
                     "query": row.get("query", ""), "database": row.get("database", ""),
                     "term_id": row.get("term_id", ""), "term_name": row.get("term_name", ""),
-                    "effect": effect, "padj": row.get("padj", ""),
+                    "direction": direction, "NES": row.get("NES", "") if method == "GSEA" else "",
+                    "overlap_count": row.get("overlap_count", "") if method == "ORA" else "", "padj": row.get("padj", ""),
                 }))
             # Keep both analyses visible: a large ORA result must not crowd all
             # ranked GSEA terms (or vice versa) out of the final report.
-            terms.extend(
-                row for _padj, row in sorted(selected, key=lambda item: item[0])[:limit_per_job]
-            )
+            groups = {}
+            for padj, row in selected:
+                groups.setdefault((row["database"], row["direction"]), []).append((padj, row))
+            for group in groups.values():
+                terms.extend(row for _padj, row in sorted(group, key=lambda item: item[0])[:limit_per_job])
     return terms
 
 
@@ -884,7 +913,8 @@ def make_report(
     inputs.extend(result_indexes)
     for index_path in result_indexes:
         for row in _rows(index_path):
-            for field in ("result_file", "shift_file", "gene_summary_file", "pair_delta_file", "audit_file"):
+            for field in ("result_file", "shift_file", "gene_summary_file", "pair_delta_file", "audit_file",
+                          "ma_png", "volcano_png"):
                 if row.get(field):
                     inputs.append(Path(row[field]))
     inputs.extend(sorted((results / "06_apa_a_mcell2019").rglob("candidate_pcpa.tsv")))
@@ -908,6 +938,7 @@ def make_report(
     for row in _rows(enrichment_index_path):
         for field in (
             "prepared_gene_table", "ora_file", "gsea_file", "plot_index", "mapping_audit", "provenance_file",
+            "plot_png",
         ):
             if row.get(field):
                 inputs.append(Path(row[field]))
@@ -922,6 +953,7 @@ def make_report(
     inputs = [path for path in inputs if path.is_file()]
     signature = signature_for(inputs, {
         "module": "report", "project": plan.project["project_id"],
+        "figure_asset_layout": FIGURE_ASSET_LAYOUT,
         "reporting": plan.project.get("reporting", {}),
         "browser_tracks": {
             key: plan.project.get("tracks", {}).get(key)
@@ -946,7 +978,7 @@ def make_report(
         ))
     )
     modules = [
-        ("alignment", "02_alignment", True),
+        ("alignment", "provenance/alignment_inputs" if plan.project.get("input_mode") == "bam" else "02_alignment", True),
         ("RSeQC", "01_qc/rseqc", enabled_modules.get("rseqc", False)),
         ("exact ends", "03_exact_ends", requirements["exact_ends"]),
         ("active PAS", "04_active_pas", requirements["active_pas"]),
@@ -981,6 +1013,7 @@ def make_report(
     _write_tsv(contrast_summary, contrast_rows, CONTRAST_SUMMARY_FIELDS)
     dge_summary = outdir / "differential_gene_expression_summary.tsv"
     dge_fields = [
+        "expression_method", "analysis_mode",
         "genome", "contrast_id", "numerator", "denominator", "design_mode",
         "paired", "n_pairs", "resolved_design",
         "dge_tested_genes", "dge_significant", "dge_up", "dge_down",
@@ -1003,10 +1036,12 @@ def make_report(
     rseqc_rows = _rows(results / "01_qc" / "rseqc" / "rseqc_summary.tsv")
     funnel_rows = _exact_funnel_rows(results)
     active_pas_rows = _active_pas_rows(results)
-    enrichment_rows = _rows(outdir / "enrichment_summary" / "enrichment_index.tsv")
+    enrichment_rows = [row for row in _rows(outdir / "enrichment_summary" / "enrichment_index.tsv")
+                       if row.get("expression_method") != "extended_exons_v1"]
     report_fdr = float(plan.project.get("reporting", {}).get("fdr", 0.05))
     enrichment_fdr = float(plan.project.get("enrichment", {}).get("padj", 0.05))
-    dge_events = _top_dge_events(results, report_fdr)
+    legacy_enabled = "legacy_c4" in expression_methods(plan.project)
+    dge_events = _top_dge_events(results, report_fdr) if legacy_enabled else []
     apa_events = _top_apa_events(results, report_fdr)
     enrichment_terms = _top_enrichment_terms(enrichment_rows, enrichment_fdr)
     dge_events_path = outdir / "top_differential_genes.tsv"
@@ -1023,6 +1058,8 @@ def make_report(
     ) if apa_b_status == "VALIDATED_PILOT_ACCEPTED" else []
     plot_images: list[tuple[str, Path]] = []
     for genome in sorted(plan.references):
+        if not legacy_enabled:
+            continue
         primary = results / "05_gene_expression" / genome / "C4_primary_deseq2"
         plot_images.extend([
             (f"{genome} C4 variance-stabilized PCA", primary / "C4_vst_pca.png"),
@@ -1050,6 +1087,9 @@ def make_report(
         ("RSeQC gene-body coverage (5-prime to 3-prime)",
          results / "01_qc" / "rseqc" / "gene_body_coverage.svg"),
     ]
+    image_assets: list[dict[str, object]] = []
+    expression_html, expression_md, expression_outputs = render_expression_report(
+        plan, results, outdir, image_assets, _image_gallery, _html_table)
     sample_fields = [field for field in (
         "sample_id", "description", "genome", "condition", "batch", "subject",
         "biological_replicate_id", "technical_replicate_count", "sequencing_lane_count",
@@ -1094,11 +1134,11 @@ def make_report(
     ]
     lines += [
         "", "## Differential and APA summary", "",
-        "| Contrast | DGE significant | DGE up | DGE down | APA-A significant genes | APA-A significant sites | APA-A2 primary genes | APA-A2 primary sites | APA-B significant genes | APA-B confirmed sites | PCPA A/A2/B | A-B agreement % |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Contrast | Primary DE method/mode | DGE significant | DGE up | DGE down | APA-A significant genes | APA-A significant sites | APA-A2 primary genes | APA-A2 primary sites | APA-B significant genes | APA-B confirmed sites | PCPA A/A2/B | A-B agreement % |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     lines.extend(
-        f"| {row['contrast_id']} | {row['dge_significant']} | {row['dge_up']} | {row['dge_down']} | "
+        f"| {row['contrast_id']} | {row.get('expression_method','')}/{row.get('analysis_mode','')} | {row['dge_significant']} | {row['dge_up']} | {row['dge_down']} | "
         f"{row['apa_a_significant_genes']} | {row['apa_a_significant_sites']} | "
         f"{row['apa_a2_primary_genes']} | {row['apa_a2_primary_sites']} | "
         f"{row['apa_b_significant_genes']} | {row['apa_b_confirmed_sites']} | "
@@ -1148,6 +1188,7 @@ def make_report(
         "- `IGV_session.xml`: session containing every generated BigWig.",
         "- `provenance_dashboard/`: receipt, environment, reference and complete output inventories.",
     ]
+    lines.extend(expression_md)
     markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     c_legend = [
@@ -1157,7 +1198,7 @@ def make_report(
         {"stage": "C2", "meaning": "filtered exact-end counts", "use": "active-PAS discovery"},
         {"stage": "C2R", "meaning": "internal-priming rejects", "use": "diagnostic tracks and QC"},
         {"stage": "C3", "meaning": "active-PAS counts", "use": "APA and PAS-usage matrices"},
-        {"stage": "C4", "meaning": "uniquely assigned active-PAS gene sums", "use": "primary DGE and normalization"},
+        {"stage": "C4", "meaning": "uniquely assigned active-PAS gene sums", "use": "optional legacy DGE; PAS-based track normalization"},
         {"stage": "C5", "meaning": "conventional exon-overlap counts", "use": "diagnostic comparison only"},
     ]
     warning_rows = warnings or [{"warning_code": "NONE", "message": "No configuration-level warnings."}]
@@ -1230,7 +1271,7 @@ def make_report(
             "quantseq_three_prime_enriched",
         ) if any(field in row for row in rseqc_rows)])
         if rseqc_rows else "<p>RSeQC was disabled or its outputs were unavailable.</p>",
-        _image_gallery(outdir, rseqc_images),
+        _image_gallery(outdir, rseqc_images, image_assets),
         "<h3>Exact-end filtering funnel</h3>",
         _html_table(funnel_rows, ["sample_id", "genome", "C0", "C1", "C1S", "C2", "C2R",
                                   "C1_over_C0_pct", "C2_over_C1_pct", "mask_rescued"])
@@ -1239,25 +1280,27 @@ def make_report(
         _html_table(active_pas_rows, ["genome", "samples", "active_pas", "C2_total", "C3_total",
                                      "C3_over_C2_pct", "ambiguous_pas", "pcpa_candidate_sites"])
         if active_pas_rows else "<p>Active-PAS audits were not available.</p>",
+        expression_html,
         "<h2 id='results'>Contrast-level results</h2>",
         "<p>Blank cells mean that the corresponding optional analysis was disabled or unavailable. "
-        "Counts are recalculated from the result tables and checked against each module index before the report is published.</p>",
+        "Counts are recalculated from the result tables and checked against each module index before the report is published. "
+        "The overview names its primary expression method and first enabled DE mode; both new modes are detailed separately above.</p>",
         "<label>Filter contrasts: <input id='contrast-filter' type='search' placeholder='condition, genome, result...'></label>",
         _html_table(contrast_rows, CONTRAST_SUMMARY_FIELDS, "contrast-table"),
-        "<h3>Top differential genes</h3>",
+        "<h3>Legacy C4 differential genes (optional)</h3>",
         "<p>Up to 25 FDR-significant genes per contrast, ordered by adjusted p-value and absolute fold change. "
         "The complete DESeq2 tables remain linked in the output manifest.</p>",
-        _html_table(dge_events, DGE_EVENT_FIELDS) if dge_events else "<p>No DGE gene passed the configured FDR.</p>",
+        _html_table(dge_events, DGE_EVENT_FIELDS) if dge_events else "<p>Legacy C4 DGE is disabled or has no significant genes.</p>",
         "<h3>Top APA gene-level events</h3>",
         "<p>Up to 25 FDR-significant genes per method and contrast. APA-A, APA-A2, and APA-B run independently; "
         "APA-A2 additionally requires the configured minimum absolute raw-count PAU change for primary calls. "
         "candidate PCPA marks intragenic premature cleavage/polyadenylation candidates, not proven termination.</p>",
         _html_table(apa_events, APA_EVENT_FIELDS) if apa_events else "<p>No APA gene passed the configured FDR.</p>",
-        "<h2 id='plots'>DGE exploratory and contrast plots</h2>",
+        "<h2 id='plots'>Legacy C4 exploratory and contrast plots (optional)</h2>",
         "<p>PCA and sample-distance plots use variance-stabilized C4 counts. MA and volcano plots are "
         "generated independently for every pairwise contrast.</p>",
-        _image_gallery(outdir, plot_images),
-        "<h2 id='enrichment'>Gene-set enrichment</h2>",
+        _image_gallery(outdir, plot_images, image_assets),
+        "<h2 id='enrichment'>Legacy C4 and APA enrichment (optional)</h2>",
         "<p>ORA uses significant foreground genes; ranked GSEA uses the complete tested background. "
         "APA queries distinguish any APA, distal/proximal shifts, and candidate PCPA increases/decreases. "
         "GO, Reactome, Hallmark, and KEGG collections are analyzed separately. Database-specific dotplots, "
@@ -1267,10 +1310,11 @@ def make_report(
             "analysis_type", "genome", "contrast_id", "background_genes", "foreground_genes",
             "significant_ora_terms", "significant_gsea_terms", "rich_plot_count", "status",
         ) if any(field in row for row in enrichment_rows)]) if enrichment_rows else "<p>Enrichment was disabled or unavailable.</p>",
-        "<h3>Top significant enrichment terms</h3>",
-        _html_table(enrichment_terms, ENRICHMENT_TERM_FIELDS)
-        if enrichment_terms else "<p>No enrichment term passed the configured adjusted-p threshold.</p>",
-        _image_gallery(outdir, enrichment_images),
+        "<h3>ORA summaries</h3>",
+        _html_table([row for row in enrichment_terms if row['method'] == 'ORA'], [field for field in ENRICHMENT_TERM_FIELDS if field != 'NES']),
+        "<h3>GSEA summaries</h3>",
+        _html_table([row for row in enrichment_terms if row['method'] == 'GSEA'], [field for field in ENRICHMENT_TERM_FIELDS if field != 'overlap_count']),
+        _image_gallery(outdir, enrichment_images, image_assets),
         "<h2 id='apa-b'>APA-B validation and interpretation</h2>",
         f"<p><strong>{html.escape(apa_b_status)}</strong></p>", _html_table(apa_b_rows, ["property", "value"]),
         "<p>APA-A, APA-A2, and APA-B are independently switchable analyses. APA-A2 shares the condition-blind C3 "
@@ -1312,11 +1356,14 @@ def make_report(
         "if(q){q.addEventListener('input',()=>{const v=q.value.toLowerCase();"
         "document.querySelectorAll('#contrast-table tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(v));});}"
         "</script></body></html>\n", encoding="utf-8")
+    image_manifest = outdir / "report_image_assets.json"
+    write_image_manifest(image_manifest, image_assets)
     provenance_outputs = generate_provenance_dashboard(plan, results, outdir)
     outputs = [
         markdown, html_target, summary, contrast_summary, dge_summary, apa_summary,
         dge_events_path, apa_events_path, enrichment_terms_path,
-        *browser, *provenance_outputs,
+        *browser, *provenance_outputs, image_manifest, *expression_outputs,
+        *sorted({outdir / str(record["asset"]) for record in image_assets}),
     ]
     write_receipt("report", outdir, signature, outputs, ["rna-ends2tracks", "report"])
     event(log_dir, "report", "completed", str(html_target))

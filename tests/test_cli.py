@@ -3,6 +3,7 @@ import csv
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from rnaends2tracks.cli import (
@@ -18,6 +19,24 @@ HEADER = (
 
 
 class CliTests(unittest.TestCase):
+    def test_bam_dry_run_skips_all_fastq_and_pas_stages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            sheet=root/"samples.csv"
+            sheet.write_text(HEADER+"".join(f"{group}{rep},fixture,GRCm39,{group}{rep},T01,L001,/deleted/{group}{rep}.fq.gz,,{group},B1,{group}{rep},quantseq_rev_v2_se,SE,150,REV_V2,false\n" for group in ("A","B") for rep in (1,2)))
+            config=root/"config.conf"
+            config.write_text('\n'.join(["PROJECT_ID=bam_fixture",'SAMPLESHEET=samples.csv','OUTPUT_DIR=results',
+                'INPUT_MODE=bam','ALIGNMENT_SOURCE_DIR=old/02_alignment','MM39_GTF=/missing/genes.gtf',
+                'MM39_CHROM_SIZES=/missing/chrom.sizes','RUN_APA_A_MCELL2019=false','RUN_APA_A2=false',
+                'RUN_RSEQC=false','RUN_TRACKS=false','CLEANUP_INTERMEDIATES=false','PAIRING_MODE=none'])+'\n')
+            args=parser().parse_args(['--config',str(config),'--dry-run','--skip-input-checks'])
+            with patch('rnaends2tracks.cli.preprocess',side_effect=AssertionError('BAM rerun reached preprocessing')) as upstream:
+                self.assertEqual(execute(args),0)
+                upstream.assert_not_called()
+            log=(root/'results'/'rna_ends2tracks.log').read_text()
+            self.assertIn('Selected stages: validate,gene_expression,enrichment,report',log)
+            self.assertNotIn('STAR --runThreadN',log)
+
     def test_config_option_matches_positional_form_and_rejects_ambiguity(self):
         flagged = parser().parse_args(["--config", "/project/config.conf"])
         positional = parser().parse_args(["/project/config.conf"])
